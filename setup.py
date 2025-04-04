@@ -10,7 +10,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="portfolio_analytics",
-    version="0.1",
+    version="0.2",
     packages=find_packages(),
     install_requires=[
         "yfinance",
@@ -21,5 +21,5 @@ setup(
     author="Arjun Deshpande",
     description="A Python package for portfolio analytics",
     long_description=open("README.md").read(),
-    url="https://github.com/deshpande-arjun/portfolio-analytics",
+    url="https://github.com/deshpande-arjun/analytics-portfolio",
 )

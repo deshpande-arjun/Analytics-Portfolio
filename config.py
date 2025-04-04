@@ -12,9 +12,9 @@ import os
 system = 'windows' if os.name == 'nt' else 'mac'
 
 if system=='mac':
-    Base_dir = '/Users/arjundeshpande/Library/Mobile Documents/com~apple~CloudDocs/ETF decomposition/Portfolio-Analytics'
+    Base_dir = '/Users/arjundeshpande/Library/Mobile Documents/com~apple~CloudDocs/ETF decomposition/Analytics-Portfolio'
 else:
-    Base_dir = 'C:\ArjunDesktop\iCloudDrive\ETF decomposition\Portfolio-Analytics'
+    Base_dir = 'C:\ArjunDesktop\iCloudDrive\ETF decomposition\Analytics-Portfolio'
 
 #os.chdir(Base_dir)
 

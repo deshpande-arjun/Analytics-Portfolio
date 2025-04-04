@@ -6,7 +6,7 @@ Created on Mon Feb 17 01:07:51 2025
 @author: arjundeshpande
 """
 
-# portfolio_analytics/__init__.py
+# analytics_portfolio/__init__.py
 """
 Portfolio Analytics package
 """

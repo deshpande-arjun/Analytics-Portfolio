@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Feb 16 12:06:22 2025
+
+@author: arjundeshpande
+"""
+
+#%% Rough Work
+
+import pandas as pd
+import os
+# import requests
+# import json
+import sys
+
+
+#wd = 'C:\ArjunDesktop\iCloudDrive\ETF decomposition'
+wd = '/Users/arjundeshpande/Library/Mobile Documents/com~apple~CloudDocs/ETF decomposition/App/scripts'
+os.chdir(wd)
+sys.path.append("..") # Allow imports from parent directory ie. a level up
+
+# Actual curated report from IBKR of current positions:
+real_port = pd.read_csv("CurrentPositions_1.31.2025.csv") # read excel to get current portfolio positions
+etf_list = [x for x in real_port.Symbol[real_port.SubCategory=='ETF']] # filter the etf list from portfolio
+#stock_list = [x for x in real_port.Symbol[real_port.SubCategory=='COMMON']] # filter the etf list from portfolio
+from classes.market_data import MarketData
+market_data = MarketData()
+etf_metadata = market_data.get_etf_metadata(etf_list)  # meta data for all etfs in the list
+
+stock_data =  market_data.get_stock_data(stock_list)
+
+from portfolio_decomposer import PortfolioDecomposer
+portfolio(port, stock_universe, etf_sectors_dict=None, etf_holdings_dict=None)
+
+
+# decompose Portfolio into stocks:
+etf_holdings_dict = dict_etf_holdings(etf_list, etf_metadata) # dictionary of etf to constituent stocks
+decomposed_stocks_JanEnd2025 = port_decomp_stocks(real_port, etf_holdings_dict) # function decomposing port into constituent stocks
+decomposed_stocks_JanEnd2025.to_excel("decomposed_stock_holdings_JanEnd2025.xlsx") # export the stock holdings to excel
+
+# decompose Portfolio into stocks:
+etf_sectors_dict = dict_etf_sectors(etf_list, etf_metadata) # dictionary of etf to constituent sectors
+port_to_sector = port_decomp_sectors(real_port, etf_sectors_dict, stock_universe) # Portfolio is decomposed into sectors
+
+
+#%%
+
+# dummy portfolio file
+port = pd.read_excel("portfolio_allocation.xlsx") # read excel to get portfolio positions
+etf_list = [x for x in port.ticker[port.asset=='etf']] # filter the etf list from portfolio
+etf_holdings_dict = dict_etf_holdings(etf_list)     # dictionary of etf to constituent stocks
+decomposed_stocks = etf_decomposed(port,etf_holdings_dict ) # function decomposing port into constituent stocks
+decomposed_stocks.to_excel("decomposed_stock_holdings.xlsx") # export the stock holdings to excel
+
+# Actual curated report from IBKR of current positions:
+META_FILE = "etf_metadata.json"
+real_port = pd.read_csv("CurrentPositions_1.31.2025.csv") # read excel to get current portfolio positions
+etf_list = [x for x in real_port.Symbol[real_port.SubCategory=='ETF']] # filter the etf list from portfolio
+etf_metadata      = store_etf_metadata(etf_list,META_FILE)  # meta data for all etfs in the list
+
+
+# decompose Portfolio into stocks:
+etf_holdings_dict = dict_etf_holdings(etf_list, etf_metadata) # dictionary of etf to constituent stocks
+decomposed_stocks_JanEnd2025 = port_decomp_stocks(real_port, etf_holdings_dict) # function decomposing port into constituent stocks
+decomposed_stocks_JanEnd2025.to_excel("decomposed_stock_holdings_JanEnd2025.xlsx") # export the stock holdings to excel
+
+# decompose Portfolio into stocks:
+etf_sectors_dict = dict_etf_sectors(etf_list, etf_metadata) # dictionary of etf to constituent sectors
+port_to_sector = port_decomp_sectors(real_port, etf_sectors_dict, stock_universe) # Portfolio is decomposed into sectors
+
+# using SP500 as the benchmark:
+benchmark = etf_sectors_dict["SPY"]
+
+####
+#REMEMBER TO update the holdings functions to avoid changing dfs outside the function
+#replicate the function using sector functions
+## check whether the deep copy=True is necessary similarly check if the issue is resolved just by removing "inplace" lines
+####
+
+#%% Create stock universe data
+import sqlite3
+import yfinance as yf
+import pandas as pd
+from datetime import datetime
+
+# all the tickers that are needed in the stock universe
+port_tickers_all = list(decomposed_stocks_JanEnd2025.ticker)
+#port_tickers_all = ["AAPL", "MSFT", "GOOGL", "AMZN", "SPY", "VOO"]
+
+# updating the stock universe database
+create_stock_universe_database(port_tickers_all, existing_data ="stocks.db", use_old_data=True, update_threshold_days=30)
+
+#access and call stock universe data:
+conn = sqlite3.connect("stocks.db")
+stock_universe = pd.read_sql("SELECT * FROM stock_universe_data", conn)
+conn.close()
+
+
+
+#%%
+
+conn = sqlite3.connect("stocks.db")
+df = pd.read_sql_query("SELECT * FROM stock_universe_data LIMIT 5", conn)
+print(df)
+conn.close()
+
+conn = sqlite3.connect("stocks.db")
+
+cursor = conn.cursor()
+
+cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+tables = cursor.fetchall()
+
+print("Tables in database:", tables)
+
+conn.close()

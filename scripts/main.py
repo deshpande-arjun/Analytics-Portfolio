@@ -24,7 +24,7 @@ sys.path.append(Class_dir)
 from classes import MarketData, PortfolioDecomposer, PortfolioCalculations
 
 # Initialize MarketData
-db_name=os.path.join(Data_dir, "stocks.db")
+db_name=os.path.join(Data_dir, "stocks_data_5yr.db")
 meta_file=os.path.join(Data_dir, "etf_metadata.json")
 market_data = MarketData(db_name,meta_file)
 

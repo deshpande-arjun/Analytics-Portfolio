@@ -100,6 +100,28 @@ class PortfolioDecomposer:
     #     # Return final DataFrame with columns: [ticker, allocation, port_weight]
     #     # If you want 'name' columns, you'll merge or group by (ticker, name).
     #     return grouped_stocks
+    
+    def map_to_gics_sector(self, label):
+        """
+        Maps Yahoo Finance sector labels to official GICS sector names.
+        """
+        mapping = {
+            "Basic Materials": "Materials",
+            "Communication Services":"Communication Services",
+            "Consumer Cyclical": "Consumer Discretionary",
+            "Consumer Defensive": "Consumer Staples",
+            "Energy": "Energy",
+            "Financial Services": "Financials",
+            "Healthcare": "Health Care",
+            "Industrials": "Industrials",
+            "Real Estate": "Real Estate",
+            "Technology": "Information Technology",
+            "Utilities": "Utilities",
+            "N/A": "Unknown Unmapped",
+        }
+        return mapping.get(label, "Unknown Unmapped")
+    
+    
     def decompose_stocks(self):
         """
         Decompose the entire portfolio (stocks + ETFs) into stock-level allocations.
@@ -124,10 +146,16 @@ class PortfolioDecomposer:
     
         # Compute portfolio weights
         total_alloc = grouped_stocks["allocation"].sum()
-        grouped_stocks["port_weight"] = grouped_stocks["allocation"] / total_alloc
+        grouped_stocks["port_weight_pct"] = grouped_stocks["allocation"] / total_alloc *100
+        
+        #Sort the df from highest port weight to lowest
+        grouped_stocks_sorted = grouped_stocks.sort_values(by="port_weight_pct", ascending=False)
+
+        # Optionally reset the index
+        grouped_stocks_sorted = grouped_stocks_sorted.reset_index(drop=True)
     
         # Return final DataFrame with columns: [ticker, name, allocation, port_weight]
-        return grouped_stocks
+        return grouped_stocks_sorted
     
     def decompose_sectors(self):
         """
@@ -158,30 +186,36 @@ class PortfolioDecomposer:
 
         # Step 7: Compute sector-level weights
         total_alloc = sector_df["allocation"].sum()
-        sector_df["port_weight"] = sector_df["allocation"] / total_alloc
+        sector_df["port_weight_pct"] = sector_df["allocation"] / total_alloc *100
 
         # Return final DataFrame [gics_sector, allocation, port_weight]
         return sector_df
 
-    def map_to_gics_sector(self, label):
-        """
-        Maps Yahoo Finance sector labels to official GICS sector names.
-        """
-        mapping = {
-            "Basic Materials": "Materials",
-            "Communication Services":"Communication Services",
-            "Consumer Cyclical": "Consumer Discretionary",
-            "Consumer Defensive": "Consumer Staples",
-            "Energy": "Energy",
-            "Financial Services": "Financials",
-            "Healthcare": "Health Care",
-            "Industrials": "Industrials",
-            "Real Estate": "Real Estate",
-            "Technology": "Information Technology",
-            "Utilities": "Utilities",
-            "N/A": "Unknown Unmapped",
-        }
-        return mapping.get(label, "Unknown Unmapped")
 
+    def decompose_stock_and_sectors(self):
+        """
+        Decompose stock-level allocations into sector-level allocations.
+        Returns a single DataFrame with columns [gics_sector, allocation, port_weight].
+        """
+        # Step 1: Decompose to stock-level
+        port_to_stocks = self.decompose_stocks()  # [ticker, allocation, port_weight]
 
+        # Step 2: Get a list of all tickers in that stock-level DataFrame
+        ticker_list = list(port_to_stocks["ticker"].unique())
+
+        # Step 3: Pull stock info data from the market_data object
+        stock_info_data = self.market_data.get_stock_info_data(ticker_list)
+        if stock_info_data.empty or "sector" not in stock_info_data.columns:
+            raise ValueError("Stock info data is empty or missing 'sector' column.")
+
+        # Step 4: Standardize the sector name to a GICS sector
+        stock_info_data["gics_sector"] = stock_info_data["sector"].apply(self.map_to_gics_sector)
+
+        # Step 5: Merge stock_info_data into port_to_stocks
+        # We only need ticker -> gics_sector
+        stock_info_data_simplified = stock_info_data[["ticker", "gics_sector"]].drop_duplicates()
+        port_stocks_sectors = pd.merge(port_to_stocks, stock_info_data_simplified, on="ticker", how="left")
+
+        # Return final DataFrame [gics_sector, allocation, port_weight]
+        return port_stocks_sectors
     

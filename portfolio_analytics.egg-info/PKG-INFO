@@ -1,0 +1,30 @@
+Metadata-Version: 2.2
+Name: portfolio_analytics
+Version: 0.2
+Summary: A Python package for portfolio analytics
+Home-page: https://github.com/deshpande-arjun/analytics-portfolio
+Author: Arjun Deshpande
+Requires-Dist: yfinance
+Requires-Dist: requests
+Requires-Dist: pandas
+Requires-Dist: numpy
+Dynamic: author
+Dynamic: description
+Dynamic: home-page
+Dynamic: requires-dist
+Dynamic: summary
+
+# Portfolio Analytics
+
+
+Analytics-Portfolio folder has:
+classes
+    market_data.py
+    portfolio_calculations.py
+    portfolio_decomposer.py
+scripts
+    main_script.py
+    rough_script.py
+__init__.py
+setup.py
+config.py

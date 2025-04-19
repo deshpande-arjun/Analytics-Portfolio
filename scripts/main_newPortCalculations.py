@@ -17,7 +17,7 @@ from config import Class_dir, Data_dir, Base_dir, Portfolio_file
 from classes import MarketData, PortfolioDecomposer, PortfolioCalculations
 
 # Initialize MarketData
-db_name = os.path.join(Data_dir, "stocks_data_5yr.db")
+db_name = os.path.join(Data_dir, "stocks_1yr.db")
 meta_file = os.path.join(Data_dir, "etf_metadata.json")
 market_data = MarketData(db_name, meta_file)
 
@@ -34,15 +34,23 @@ port_decomposer = PortfolioDecomposer(portfolio, market_data)
 # Initialize PortfolioCalculations with portfolio and market_data
 port_calc = PortfolioCalculations()
 
+# Display relevant columns of portfolio 
+keep_cols = ["Symbol", "Description", "PositionValue", "AssetClass", "SubCategory"]
+portfolio_display = ( portfolio.loc[:, keep_cols].copy() )     # keep only the requested columns and make a copy
+portfolio_display["Portfolio Weight pct"] = portfolio_display.PositionValue * 100 / portfolio_display.PositionValue.sum()
+print("User's portfolio:")
+print(portfolio_display)
+
+  
 # Decompose the portfolio into stock-level allocations
 port_stocks_df = port_decomposer.decompose_stocks()  # Returns [ticker, name, allocation, port_weight_pct]
 print("Decomposed stock-level DataFrame:")
-print(port_stocks_df.head())
+print(port_stocks_df.head(20))
 
 # Decompose the portfolio into sector-level allocations
 port_sectors_df = port_decomposer.decompose_sectors()  # Returns [gics_sector, allocation, port_weight_pct]
 print("Decomposed sector-level DataFrame:")
-print(port_sectors_df.head())
+print(port_sectors_df)
 
 # =============================================================================
 # Script for Performance attribution:
@@ -79,6 +87,9 @@ benchmark_stock_and_sectors = benchmark_decomposer.decompose_stock_and_sectors()
 benchmark_stock_and_sectors['weight'] = benchmark_stock_and_sectors['allocation']/benchmark_stock_and_sectors['allocation'].sum()
 # Get sector weights and returns of the benchmark
 benchmark_sector_weights, benchmark_sector_returns = port_calc.aggregate_portfolio_by_sector(returns_monthly.reset_index(), benchmark_stock_and_sectors)
+
+# Active weights:
+
 
 # Run Attribution
 attribution_results = port_calc.brinson_hood_beebower(port_sector_weights, port_sector_returns, benchmark_sector_weights, benchmark_sector_returns)

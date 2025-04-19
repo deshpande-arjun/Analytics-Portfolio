@@ -87,7 +87,7 @@ class PortfolioCalculations:
             agg_returns = df_returns  # No aggregation
         elif frequency == 'monthly':
             # Compound returns over each month: (1 + r1)*(1 + r2)*... - 1
-            agg_returns = df_returns.resample('M').apply(lambda x: np.prod(1 + x) - 1)
+            agg_returns = df_returns.resample('ME').apply(lambda x: np.prod(1 + x) - 1)
         elif frequency == 'annually':
             agg_returns = df_returns.resample('A').apply(lambda x: np.prod(1 + x) - 1)
         else:

@@ -38,6 +38,7 @@ port_calc = PortfolioCalculations()
 keep_cols = ["Symbol", "Description", "PositionValue", "AssetClass", "SubCategory"]
 portfolio_display = ( portfolio.loc[:, keep_cols].copy() )     # keep only the requested columns and make a copy
 portfolio_display["Portfolio Weight pct"] = portfolio_display.PositionValue * 100 / portfolio_display.PositionValue.sum()
+portfolio_display = portfolio_display.sort_values(by="Portfolio Weight pct", ascending=False).reset_index(drop=True)
 print("User's portfolio:")
 print(portfolio_display)
 

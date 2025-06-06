@@ -4,7 +4,7 @@
 Analytics-Portfolio folder has:
 classes
     market_data.py
-    alpha_vantage_data.py  - helper to fetch fundamentals, technicals, news and economic data from Alpha Vantage
+    alpha_vantage_data.py  - helper to fetch fundamentals, technicals, news and economic data from Alpha Vantage. Includes utilities for income statements, balance sheets and cash flows.
     portfolio_calculations.py
     portfolio_decomposer.py
 scripts

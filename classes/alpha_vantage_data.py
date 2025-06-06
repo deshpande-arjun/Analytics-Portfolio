@@ -67,6 +67,128 @@ class AlphaVantageData:
         conn.close()
 
     # ------------------------------------------------------------------
+    # fundamental fetch helpers
+    # ------------------------------------------------------------------
+    def get_income_statement(self, ticker: str, period: str = "annual") -> pd.DataFrame | None:
+        """Return the income statement for ``ticker`` as a DataFrame."""
+        data = self._av_request("INCOME_STATEMENT", symbol=ticker)
+        if not data:
+            return None
+        key = "annualReports" if period == "annual" else "quarterlyReports"
+        return pd.DataFrame(data.get(key, []))
+
+    def get_balance_sheet(self, ticker: str, period: str = "annual") -> pd.DataFrame | None:
+        """Return the balance sheet for ``ticker`` as a DataFrame."""
+        data = self._av_request("BALANCE_SHEET", symbol=ticker)
+        if not data:
+            return None
+        key = "annualReports" if period == "annual" else "quarterlyReports"
+        return pd.DataFrame(data.get(key, []))
+
+    def get_cash_flow(self, ticker: str, period: str = "annual") -> pd.DataFrame | None:
+        """Return the cash flow statement for ``ticker`` as a DataFrame."""
+        data = self._av_request("CASH_FLOW", symbol=ticker)
+        if not data:
+            return None
+        key = "annualReports" if period == "annual" else "quarterlyReports"
+        return pd.DataFrame(data.get(key, []))
+
+    def get_income_statements(self, tickers: List[str], period: str = "annual") -> Dict[str, pd.DataFrame]:
+        """Return income statements for multiple tickers."""
+        result = {}
+        for t in tickers:
+            df = self.get_income_statement(t, period)
+            if df is not None:
+                result[t] = df
+        return result
+
+    def get_balance_sheets(self, tickers: List[str], period: str = "annual") -> Dict[str, pd.DataFrame]:
+        """Return balance sheets for multiple tickers."""
+        result = {}
+        for t in tickers:
+            df = self.get_balance_sheet(t, period)
+            if df is not None:
+                result[t] = df
+        return result
+
+    def get_cash_flows(self, tickers: List[str], period: str = "annual") -> Dict[str, pd.DataFrame]:
+        """Return cash flow statements for multiple tickers."""
+        result = {}
+        for t in tickers:
+            df = self.get_cash_flow(t, period)
+            if df is not None:
+                result[t] = df
+        return result
+
+    def _store_fundamental_report(
+        self,
+        tickers: List[str],
+        function: str,
+        table: str,
+        period: str,
+    ) -> None:
+        """Internal helper to store a fundamental report."""
+        conn = sqlite3.connect(self.db_name)
+        with conn:
+            conn.execute(
+                f"""CREATE TABLE IF NOT EXISTS {table} (
+                ticker TEXT,
+                fiscal_date_ending TEXT,
+                period TEXT,
+                data TEXT,
+                PRIMARY KEY (ticker, fiscal_date_ending, period)
+            )"""
+            )
+
+            key = "annualReports" if period == "annual" else "quarterlyReports"
+            for ticker in tickers:
+                data = self._av_request(function, symbol=ticker)
+                if not data:
+                    continue
+                for rep in data.get(key, []):
+                    fdate = rep.get("fiscalDateEnding")
+                    conn.execute(
+                        f"INSERT OR REPLACE INTO {table} (ticker, fiscal_date_ending, period, data)"
+                        " VALUES (?, ?, ?, ?)",
+                        (ticker, fdate, period, pd.Series(rep).to_json()),
+                    )
+        conn.close()
+
+    def store_income_statement(self, tickers: List[str], period: str = "annual") -> None:
+        """Fetch and store income statements for the tickers provided."""
+        self._store_fundamental_report(
+            tickers,
+            "INCOME_STATEMENT",
+            "fundamental_income_statement",
+            period,
+        )
+
+    def store_balance_sheet(self, tickers: List[str], period: str = "annual") -> None:
+        """Fetch and store balance sheets for the tickers provided."""
+        self._store_fundamental_report(
+            tickers,
+            "BALANCE_SHEET",
+            "fundamental_balance_sheet",
+            period,
+        )
+
+    def store_cash_flow(self, tickers: List[str], period: str = "annual") -> None:
+        """Fetch and store cash flow statements for the tickers provided."""
+        self._store_fundamental_report(
+            tickers,
+            "CASH_FLOW",
+            "fundamental_cash_flow",
+            period,
+        )
+
+    def store_all_fundamentals(self, tickers: List[str], period: str = "annual") -> None:
+        """Store overview, income statement, balance sheet and cash flow."""
+        self.store_company_overview(tickers)
+        self.store_income_statement(tickers, period)
+        self.store_balance_sheet(tickers, period)
+        self.store_cash_flow(tickers, period)
+
+    # ------------------------------------------------------------------
     # technical indicators
     # ------------------------------------------------------------------
     def store_technical_indicator(

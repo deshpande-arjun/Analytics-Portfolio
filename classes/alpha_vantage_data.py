@@ -24,6 +24,87 @@ class AlphaVantageData:
         self.api_key = api_key
 
     # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+    def _connect(self, db_name: str | None = None) -> sqlite3.Connection:
+        """Return a connection to ``db_name`` (or :pyattr:`self.db_name`)."""
+        return sqlite3.connect(db_name or self.db_name)
+
+    def create_database(self, db_name: str | None = None) -> None:
+        """Create a new SQLite database with all required tables."""
+        conn = self._connect(db_name)
+        with conn:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS fundamental_overview (
+                ticker TEXT PRIMARY KEY,
+                data   TEXT
+            )"""
+            )
+            for tbl in (
+                "fundamental_income_statement",
+                "fundamental_balance_sheet",
+                "fundamental_cash_flow",
+            ):
+                conn.execute(
+                    f"""CREATE TABLE IF NOT EXISTS {tbl} (
+                    ticker TEXT,
+                    fiscal_date_ending TEXT,
+                    period TEXT,
+                    data TEXT,
+                    PRIMARY KEY (ticker, fiscal_date_ending, period)
+                )"""
+                )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS technical_indicators (
+                date TEXT,
+                ticker TEXT,
+                indicator TEXT,
+                value REAL,
+                PRIMARY KEY (date, ticker, indicator)
+            )"""
+            )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS economic_indicators (
+                date TEXT,
+                indicator TEXT,
+                value REAL,
+                PRIMARY KEY (date, indicator)
+            )"""
+            )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS news_sentiment (
+                time_published TEXT,
+                ticker TEXT,
+                headline TEXT,
+                summary TEXT,
+                sentiment TEXT,
+                score REAL,
+                PRIMARY KEY (time_published, ticker)
+            )"""
+            )
+        conn.close()
+
+    def record_exists(
+        self,
+        table: str,
+        ticker: str,
+        date: str,
+        date_column: str = "date",
+        db_name: str | None = None,
+    ) -> bool:
+        """Return ``True`` if ``table`` has a row for ``ticker`` and ``date``."""
+        conn = self._connect(db_name)
+        cur = conn.execute(
+            f"SELECT 1 FROM {table} WHERE ticker=? AND {date_column}=? LIMIT 1",
+            (ticker, date),
+        )
+        exists = cur.fetchone() is not None
+        conn.close()
+        return exists
+
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
     # internal helper to call Alpha Vantage
     # ------------------------------------------------------------------
     def _av_request(self, function: str, **params: Any) -> Dict[str, Any] | None:
@@ -45,9 +126,9 @@ class AlphaVantageData:
     # ------------------------------------------------------------------
     # fundamental data
     # ------------------------------------------------------------------
-    def store_company_overview(self, tickers: List[str]) -> None:
+    def store_company_overview(self, tickers: List[str], db_name: str | None = None) -> None:
         """Fetch ``OVERVIEW`` data for tickers and store in the database."""
-        conn = sqlite3.connect(self.db_name)
+        conn = self._connect(db_name)
         table = "fundamental_overview"
         with conn:
             conn.execute(
@@ -126,9 +207,10 @@ class AlphaVantageData:
         function: str,
         table: str,
         period: str,
+        db_name: str | None = None,
     ) -> None:
         """Internal helper to store a fundamental report."""
-        conn = sqlite3.connect(self.db_name)
+        conn = self._connect(db_name)
         with conn:
             conn.execute(
                 f"""CREATE TABLE IF NOT EXISTS {table} (
@@ -154,39 +236,116 @@ class AlphaVantageData:
                     )
         conn.close()
 
-    def store_income_statement(self, tickers: List[str], period: str = "annual") -> None:
+    def _update_fundamental_report(
+        self,
+        ticker: str,
+        function: str,
+        table: str,
+        period: str,
+        db_name: str | None = None,
+    ) -> None:
+        """Update ``table`` with new reports for ``ticker``."""
+        conn = self._connect(db_name)
+        with conn:
+            conn.execute(
+                f"""CREATE TABLE IF NOT EXISTS {table} (
+                ticker TEXT,
+                fiscal_date_ending TEXT,
+                period TEXT,
+                data TEXT,
+                PRIMARY KEY (ticker, fiscal_date_ending, period)
+            )"""
+            )
+
+            cur = conn.execute(
+                f"SELECT fiscal_date_ending FROM {table} WHERE ticker=? AND period=?",
+                (ticker, period),
+            )
+            existing_dates = {row[0] for row in cur.fetchall()}
+
+            data = self._av_request(function, symbol=ticker)
+            if not data:
+                return
+
+            key = "annualReports" if period == "annual" else "quarterlyReports"
+            for rep in data.get(key, []):
+                fdate = rep.get("fiscalDateEnding")
+                if fdate in existing_dates:
+                    continue
+                conn.execute(
+                    f"INSERT OR REPLACE INTO {table} (ticker, fiscal_date_ending, period, data)"
+                    " VALUES (?, ?, ?, ?)",
+                    (ticker, fdate, period, pd.Series(rep).to_json()),
+                )
+        conn.close()
+
+
+    def store_income_statement(self, tickers: List[str], period: str = "annual", db_name: str | None = None) -> None:
         """Fetch and store income statements for the tickers provided."""
         self._store_fundamental_report(
             tickers,
             "INCOME_STATEMENT",
             "fundamental_income_statement",
             period,
+            db_name,
         )
 
-    def store_balance_sheet(self, tickers: List[str], period: str = "annual") -> None:
+    def store_balance_sheet(self, tickers: List[str], period: str = "annual", db_name: str | None = None) -> None:
         """Fetch and store balance sheets for the tickers provided."""
         self._store_fundamental_report(
             tickers,
             "BALANCE_SHEET",
             "fundamental_balance_sheet",
             period,
+            db_name,
         )
 
-    def store_cash_flow(self, tickers: List[str], period: str = "annual") -> None:
+    def store_cash_flow(self, tickers: List[str], period: str = "annual", db_name: str | None = None) -> None:
         """Fetch and store cash flow statements for the tickers provided."""
         self._store_fundamental_report(
             tickers,
             "CASH_FLOW",
             "fundamental_cash_flow",
             period,
+            db_name,
         )
 
-    def store_all_fundamentals(self, tickers: List[str], period: str = "annual") -> None:
+    def update_income_statement(self, ticker: str, period: str = "annual", db_name: str | None = None) -> None:
+        """Fetch and insert only new income statement data for ``ticker``."""
+        self._update_fundamental_report(
+            ticker,
+            "INCOME_STATEMENT",
+            "fundamental_income_statement",
+            period,
+            db_name,
+        )
+
+    def update_balance_sheet(self, ticker: str, period: str = "annual", db_name: str | None = None) -> None:
+        """Fetch and insert only new balance sheet data for ``ticker``."""
+        self._update_fundamental_report(
+            ticker,
+            "BALANCE_SHEET",
+            "fundamental_balance_sheet",
+            period,
+            db_name,
+        )
+
+    def update_cash_flow(self, ticker: str, period: str = "annual", db_name: str | None = None) -> None:
+        """Fetch and insert only new cash flow data for ``ticker``."""
+        self._update_fundamental_report(
+            ticker,
+            "CASH_FLOW",
+            "fundamental_cash_flow",
+            period,
+            db_name,
+        )
+
+    def store_all_fundamentals(self, tickers: List[str], period: str = "annual", db_name: str | None = None) -> None:
         """Store overview, income statement, balance sheet and cash flow."""
-        self.store_company_overview(tickers)
-        self.store_income_statement(tickers, period)
-        self.store_balance_sheet(tickers, period)
-        self.store_cash_flow(tickers, period)
+        self.store_company_overview(tickers, db_name)
+        self.store_income_statement(tickers, period, db_name)
+        self.store_balance_sheet(tickers, period, db_name)
+        self.store_cash_flow(tickers, period, db_name)
 
     # ------------------------------------------------------------------
     # technical indicators
@@ -198,6 +357,7 @@ class AlphaVantageData:
         interval: str = "daily",
         time_period: int | None = None,
         series_type: str = "close",
+        db_name: str | None = None,
     ) -> None:
         """Fetch a technical indicator (e.g. RSI, SMA) and store to database."""
         params = {
@@ -212,7 +372,7 @@ class AlphaVantageData:
         if not data:
             return
 
-        conn = sqlite3.connect(self.db_name)
+        conn = self._connect(db_name)
         table = "technical_indicators"
         with conn:
             conn.execute(
@@ -249,13 +409,13 @@ class AlphaVantageData:
     # ------------------------------------------------------------------
     # economic indicators
     # ------------------------------------------------------------------
-    def store_economic_indicator(self, indicator: str) -> None:
+    def store_economic_indicator(self, indicator: str, db_name: str | None = None) -> None:
         """Fetch and store a global/economic indicator series."""
         data = self._av_request(indicator)
         if not data:
             return
 
-        conn = sqlite3.connect(self.db_name)
+        conn = self._connect(db_name)
         table = "economic_indicators"
         with conn:
             conn.execute(
@@ -289,9 +449,9 @@ class AlphaVantageData:
     # ------------------------------------------------------------------
     # news sentiment
     # ------------------------------------------------------------------
-    def store_news_sentiment(self, tickers: List[str]) -> None:
+    def store_news_sentiment(self, tickers: List[str], db_name: str | None = None) -> None:
         """Fetch and store Alpha Vantage ``NEWS_SENTIMENT`` data."""
-        conn = sqlite3.connect(self.db_name)
+        conn = self._connect(db_name)
         table = "news_sentiment"
         with conn:
             conn.execute(

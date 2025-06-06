@@ -10,13 +10,14 @@ from setuptools import setup, find_packages
 
 setup(
     name="portfolio_analytics",
-    version="0.2",
+    version="0.3",
     packages=find_packages(),
     install_requires=[
         "yfinance",
         "requests",
         "pandas",
-        "numpy",      
+        "numpy",
+        "sqlite3"
     ],
     author="Arjun Deshpande",
     description="A Python package for portfolio analytics",

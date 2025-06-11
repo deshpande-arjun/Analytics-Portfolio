@@ -12,6 +12,7 @@ from .portfolio_calculations import PortfolioCalculations
 from .alpha_vantage_data import AlphaVantageData
 from .data_fetcher import DataFetcher
 from .database_accessor import DatabaseAccessor
+from .feature_engineer import FeatureEngineer
 
 __all__ = [
     "MarketData",
@@ -20,4 +21,5 @@ __all__ = [
     "AlphaVantageData",
     "DataFetcher",
     "DatabaseAccessor",
+    "FeatureEngineer",
 ]

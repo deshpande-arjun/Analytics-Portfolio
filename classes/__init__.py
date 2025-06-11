@@ -10,10 +10,12 @@ from .market_data import MarketData
 from .portfolio_decomposer import PortfolioDecomposer
 from .portfolio_calculations import PortfolioCalculations
 from .alpha_vantage_data import AlphaVantageData
+from .data_fetcher import DataFetcher
 
 __all__ = [
     "MarketData",
     "PortfolioDecomposer",
     "PortfolioCalculations",
     "AlphaVantageData",
+    "DataFetcher",
 ]

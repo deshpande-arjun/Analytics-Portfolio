@@ -63,15 +63,15 @@ import pandas as pd
 import os
 import sys
 
-from config import Data_dir, AV_api_key
+from config import Data_dir, AV_api_key, AV_db_file
 from classes import AlphaVantageData
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 # SQLite database file used to store retrieved data
-DB_FILE = os.path.join(Data_dir, "av_data_test1.db")
-AV_api_key = "53U4JBZUJNQX0EVO"
+AV_db_file = os.path.join(Data_dir, "av_data_test1.db") #amending the config file's location
+
 
 # Example tickers to fetch data for
 TICKERS = ["AAPL", "MSFT", "GOOGL"]
@@ -119,3 +119,73 @@ av.store_news_sentiment(TICKERS)
 av.store_economic_indicator("REAL_GDP")
 
 print("Data fetch complete. Stored data in", DB_FILE)
+
+#%% Recent June 6, 3pm
+
+"""Example script demonstrating usage of ``AlphaVantageData``.
+
+This script initializes the :class:`AlphaVantageData` class, then
+fetches sample fundamental data, technical indicators, news sentiment
+and economic indicators for a small list of tickers. The downloaded
+data is stored in an SQLite database under the ``Market data`` folder.
+
+The script is intended as a functional smoke test for the
+``AlphaVantageData`` class and can be adapted for experimentation.
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+import os
+import sys
+
+from config import Data_dir, AV_api_key, AV_db_file
+from classes import AlphaVantageData
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+# SQLite database file used to store retrieved data
+AV_db_file = os.path.join(Data_dir, "av_data_test1.db") #amending the config file's location
+
+# Tickers to download data for
+TICKERS = ["AAPL", "MSFT", "GOOGL"]
+
+# Technical indicators to fetch
+# Format: (indicator name, time period)
+TECHNICALS = [
+    ("SMA", 20),
+    ("EMA", 20),
+    ("RSI", 14),
+]
+
+# Economic indicators to store
+ECONOMIC_SERIES = ["REAL_GDP"]
+
+"""Instantiate :class:`AlphaVantageData` and fetch data."""
+av = AlphaVantageData(db_name=AV_db_file, api_key=AV_api_key)
+
+# Ensure all required tables exist
+av_data = av.create_database()
+
+# Fundamental data: overview, income statement, balance sheet, cash flow
+av.store_all_fundamentals(TICKERS, period="annual")
+
+# Technical indicators for each ticker
+for ticker in TICKERS:
+    for indicator, period in TECHNICALS:
+        av.store_technical_indicator(
+            ticker,
+            indicator,
+            interval="daily",
+            time_period=period,
+        )
+
+# News sentiment
+av.store_news_sentiment(TICKERS)
+
+# Economic indicators
+for econ in ECONOMIC_SERIES:
+    av.store_economic_indicator(econ)
+
+

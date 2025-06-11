@@ -15,7 +15,7 @@ Base_dir = os.path.dirname(os.path.abspath(__file__))
 Parent_dir = os.path.abspath(os.path.join(Base_dir, os.pardir))
 
 # Directory that holds the data (e.g., "Market data" is one level up)
-Data_dir = os.path.join(Parent_dir, "Market data")
+Data_dir = os.path.join(Base_dir, "data")
 
 # Folder that holds classes (within Analytics-Portfolio)
 Class_dir = os.path.join(Base_dir, "classes")
@@ -24,6 +24,8 @@ Class_dir = os.path.join(Base_dir, "classes")
 Portfolio_file = os.path.join(Data_dir, "CurrentPositions_dummy.csv")
 Etf_data_file = os.path.join(Data_dir, "etf_metadata.json")
 Stocksdb_file = os.path.join(Data_dir, "stocks.db")
+AV_db_file = os.path.join(Data_dir, "av_data.db")
+
 
 # API Key (if needed)
-AV_api_key="KZDZF6D34D3E50IG"
+AV_api_key="53U4JBZUJNQX0EVO"

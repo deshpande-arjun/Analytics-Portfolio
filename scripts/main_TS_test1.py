@@ -57,8 +57,6 @@ The script is intended as a functional smoke test for the
 ``AlphaVantageData`` class and can be adapted for experimentation.
 """
 
-from __future__ import annotations
-
 import pandas as pd
 import os
 import sys
@@ -132,8 +130,6 @@ data is stored in an SQLite database under the ``Market data`` folder.
 The script is intended as a functional smoke test for the
 ``AlphaVantageData`` class and can be adapted for experimentation.
 """
-
-from __future__ import annotations
 
 import pandas as pd
 import os

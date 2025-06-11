@@ -189,3 +189,86 @@ for econ in ECONOMIC_SERIES:
     av.store_economic_indicator(econ)
 
 
+#%% Testing AlphaVantageData DataAccessor & FeatureEngineer June 11
+
+
+"""Example data pipeline using AlphaVantageData, DatabaseAccessor and FeatureEngineer.
+
+The script fetches various data from Alpha Vantage, stores it in an SQLite
+database, then reads the data back and computes sample features. The final
+result is made available as a pandas DataFrame for further analysis.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import List
+
+import pandas as pd
+
+from config import AV_api_key, AV_db_file
+from classes import DataFetcher, DatabaseAccessor, FeatureEngineer
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+# Placeholder list of tickers to fetch data for
+TICKERS: List[str] = [...]  # e.g. ["AAPL", "MSFT", "GOOGL"]
+
+# Technical indicators we want to store
+TECHNICALS = [
+    ("SMA", 20),
+    ("EMA", 20),
+    ("RSI", 14),
+]
+
+
+# ---------------------------------------------------------------------------
+# Fetch and store raw data
+# ---------------------------------------------------------------------------
+fetcher = DataFetcher(db_name=AV_db_file, api_key=AV_api_key)
+
+# Fundamental reports: overview, income statement, balance sheet, cash flow
+fetcher.store_all_fundamentals(TICKERS)
+
+# Daily price history
+fetcher.store_daily_prices(TICKERS, outputsize="full")
+
+# News sentiment
+fetcher.store_news_sentiment(TICKERS)
+
+# Technical indicators
+for ticker in TICKERS:
+    for indicator, period in TECHNICALS:
+        fetcher.store_technical_indicator(ticker, indicator, time_period=period)
+
+print("Raw data downloaded and stored.")
+
+
+# ---------------------------------------------------------------------------
+# Access stored data
+# ---------------------------------------------------------------------------
+accessor = DatabaseAccessor(db_name=AV_db_file)
+prices = accessor.get_prices(TICKERS)
+fundamentals = accessor.get_fundamentals(TICKERS)
+
+# Example join of prices with company overview
+price_overview = accessor.get_prices_with_overview(TICKERS)
+
+# ---------------------------------------------------------------------------
+# Feature engineering
+# ---------------------------------------------------------------------------
+engineer = FeatureEngineer(accessor)
+ratios = engineer.compute_financial_ratios(TICKERS)
+volatility = engineer.rolling_volatility(prices, window=20)
+
+# Merge engineered features with daily prices
+full_data = prices.merge(ratios, on="ticker", how="left")
+full_data = full_data.merge(volatility[["ticker", "date", "volatility"]],
+                            on=["ticker", "date"], how="left")
+
+# ``full_data`` now contains price history along with basic ratios and
+# volatility estimates. This DataFrame can be used for modeling or
+# regression analysis.
+print(full_data.head())

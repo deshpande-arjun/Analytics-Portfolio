@@ -26,8 +26,19 @@ class DatabaseAccessor:
     def _to_numeric(self, df: pd.DataFrame) -> pd.DataFrame:
         """Convert non-index columns of ``df`` to numeric when possible."""
         for col in df.columns:
+            # if col.lower() == "ticker":
+            #     continue #skips ticker (string) from convert to numeric
             if pd.api.types.is_object_dtype(df[col]):
-                df[col] = pd.to_numeric(df[col], errors="ignore")
+                sample = df[col].dropna().astype(str).head(10)  # sample up to 10 non-null entries
+                
+                if sample.str.match(r'^-?\d+(\.\d+)?$').all():    
+                    try:
+                        df[col] = pd.to_numeric(df[col])
+                    except (ValueError, TypeError) as e: 
+                        print(f" Warning: Failed to convert column '{col}' to numeric. Reason: {e}")
+                
+                else:
+                    continue
         return df
 
     # ------------------------------------------------------------------

@@ -17,3 +17,5 @@ scripts
 __init__.py
 setup.py
 config.py
+logging_utils.py - helper to configure rotating loggers
+date_utils.py    - pandas-friendly date utilities

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import sqlite3
 import requests
+import time
+import json
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -17,6 +19,7 @@ class DataFetcher:
     def __init__(self, db_name: str = "av_data.db", api_key: str = "demo") -> None:
         self.db_name = db_name
         self.api_key = api_key
+        self.call_interval = 0.2  # seconds between API calls (5 calls/sec)
 
     # ------------------------------------------------------------------
     # connection helpers
@@ -25,20 +28,37 @@ class DataFetcher:
         """Return a connection to the configured database."""
         return sqlite3.connect(db_name or self.db_name)
 
-    def _av_request(self, function: str, **params: Any) -> Dict[str, Any] | None:
-        """Call the Alpha Vantage API and return the parsed JSON."""
+    def _fetch_alphavantage_data(self, function: str, **params: Any) -> Dict[str, Any] | None:
+        """Call the Alpha Vantage API with retries and basic rate limiting."""
         base_url = "https://www.alphavantage.co/query"
+        params = {k: v for k, v in params.items() if v is not None}
         payload = {"function": function, "apikey": self.api_key}
         payload.update(params)
-        try:
-            resp = requests.get(base_url, params=payload, timeout=30)
-            if resp.status_code == 200:
-                return resp.json()
-            print(f"⚠️ API request failed: {resp.status_code}")
-            return None
-        except Exception as exc:  # pragma: no cover - network
-            print(f"⚠️ API request error: {exc}")
-            return None
+
+        for attempt in range(3):
+            try:
+                resp = requests.get(base_url, params=payload, timeout=10)
+                time.sleep(self.call_interval)
+                if resp.status_code != 200:
+                    print(f"HTTP {resp.status_code}: {resp.reason}")
+                    continue
+                data = resp.json()
+                if "Note" in data:
+                    print(data["Note"])
+                    time.sleep((2 ** attempt) * self.call_interval)
+                    continue
+                if "Error Message" in data:
+                    print(data["Error Message"])
+                    return None
+                return data
+            except requests.exceptions.RequestException as exc:
+                print(f"Request error: {exc}")
+                time.sleep((2 ** attempt) * self.call_interval)
+        return None
+
+    def _av_request(self, function: str, **params: Any) -> Dict[str, Any] | None:
+        """Backward-compatible wrapper for :meth:`_fetch_alphavantage_data`."""
+        return self._fetch_alphavantage_data(function, **params)
 
     # ------------------------------------------------------------------
     # database creation / logging
@@ -478,3 +498,139 @@ class DataFetcher:
     def run_daily_update(self, tickers: List[str], db_name: str | None = None) -> None:
         for ticker in tickers:
             self.update_daily_prices(ticker, db_name=db_name)
+
+    # ------------------------------------------------------------------
+    # simplified raw data storage helpers
+    # ------------------------------------------------------------------
+    def store_fundamental_data(self, ticker: str, function: str, db_name: str | None = None) -> None:
+        """Fetch and store fundamental data from Alpha Vantage."""
+        data = self._fetch_alphavantage_data(function, symbol=ticker)
+        if not data:
+            return
+        conn = sqlite3.connect(db_name or self.db_name)
+        with conn:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS fundamental_data (
+                    ticker TEXT,
+                    function TEXT,
+                    data TEXT,
+                    last_updated TEXT,
+                    PRIMARY KEY(ticker, function)
+                )"""
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO fundamental_data (ticker, function, data, last_updated) VALUES (?, ?, ?, ?)",
+                (
+                    ticker,
+                    function,
+                    json.dumps(data),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+        conn.close()
+
+    def store_technical_data(
+        self,
+        ticker: str,
+        indicator: str,
+        interval: str = "daily",
+        time_period: int | None = None,
+        series_type: str = "close",
+        db_name: str | None = None,
+    ) -> None:
+        """Fetch and store technical indicator data."""
+        params = {
+            "symbol": ticker,
+            "interval": interval,
+            "series_type": series_type,
+            "time_period": time_period,
+        }
+        data = self._fetch_alphavantage_data(indicator, **params)
+        if not data:
+            return
+        conn = sqlite3.connect(db_name or self.db_name)
+        with conn:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS technical_data (
+                    ticker TEXT,
+                    indicator TEXT,
+                    interval TEXT,
+                    time_period INTEGER,
+                    series_type TEXT,
+                    data TEXT,
+                    last_updated TEXT,
+                    PRIMARY KEY(ticker, indicator, interval, time_period, series_type)
+                )"""
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO technical_data (ticker, indicator, interval, time_period, series_type, data, last_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ticker,
+                    indicator,
+                    interval,
+                    time_period,
+                    series_type,
+                    json.dumps(data),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+        conn.close()
+
+    def store_economic_data(self, function: str, db_name: str | None = None) -> None:
+        """Fetch and store economic indicator data."""
+        data = self._fetch_alphavantage_data(function)
+        if not data:
+            return
+        conn = sqlite3.connect(db_name or self.db_name)
+        with conn:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS economic_data (
+                    function TEXT PRIMARY KEY,
+                    data TEXT,
+                    last_updated TEXT
+                )"""
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO economic_data (function, data, last_updated) VALUES (?, ?, ?)",
+                (
+                    function,
+                    json.dumps(data),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+        conn.close()
+
+    def store_news_sentiment(
+        self,
+        tickers: str | List[str] | None = None,
+        topics: str | None = None,
+        db_name: str | None = None,
+    ) -> None:
+        """Fetch and store news sentiment data."""
+        tickers_param = ",".join(tickers) if isinstance(tickers, list) else tickers
+        data = self._fetch_alphavantage_data(
+            "NEWS_SENTIMENT", tickers=tickers_param, topics=topics, sort="LATEST", limit=50
+        )
+        if not data:
+            return
+        conn = sqlite3.connect(db_name or self.db_name)
+        with conn:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS news_sentiment (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tickers TEXT,
+                    topics TEXT,
+                    data TEXT,
+                    last_updated TEXT
+                )"""
+            )
+            conn.execute(
+                "INSERT INTO news_sentiment (tickers, topics, data, last_updated) VALUES (?, ?, ?, ?)",
+                (
+                    tickers_param,
+                    topics,
+                    json.dumps(data),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+        conn.close()

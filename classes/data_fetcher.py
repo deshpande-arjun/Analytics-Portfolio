@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import sqlite3
 import requests
+import time
+import json
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -17,6 +19,9 @@ class DataFetcher:
     def __init__(self, db_name: str = "av_data.db", api_key: str = "demo") -> None:
         self.db_name = db_name
         self.api_key = api_key
+        # Alpha Vantage allows up to 75 calls per minute for most plans.
+        # ``call_interval`` defines the sleep time between API requests.
+        self.call_interval = 60 / 75
 
     # ------------------------------------------------------------------
     # connection helpers
@@ -25,20 +30,51 @@ class DataFetcher:
         """Return a connection to the configured database."""
         return sqlite3.connect(db_name or self.db_name)
 
-    def _av_request(self, function: str, **params: Any) -> Dict[str, Any] | None:
-        """Call the Alpha Vantage API and return the parsed JSON."""
+    def _fetch_alphavantage_data(self, function: str, **params: Any) -> Dict[str, Any] | None:
+        """Call the Alpha Vantage API respecting rate limits and retries."""
+
+        # Remove parameters set to ``None`` so they are not sent to the API
+        filtered = {k: v for k, v in params.items() if v is not None}
+
         base_url = "https://www.alphavantage.co/query"
         payload = {"function": function, "apikey": self.api_key}
-        payload.update(params)
-        try:
-            resp = requests.get(base_url, params=payload, timeout=30)
-            if resp.status_code == 200:
-                return resp.json()
-            print(f"⚠️ API request failed: {resp.status_code}")
-            return None
-        except Exception as exc:  # pragma: no cover - network
-            print(f"⚠️ API request error: {exc}")
-            return None
+        payload.update(filtered)
+
+        for attempt in range(3):
+            # simple rate limiting
+            time.sleep(self.call_interval)
+            try:
+                resp = requests.get(base_url, params=payload, timeout=10)
+                if resp.status_code != 200:
+                    print(f"⚠️ HTTP error: {resp.status_code}")
+                    time.sleep(self.call_interval * (2 ** attempt))
+                    continue
+
+                data = resp.json()
+
+                # Handle API level errors and notes
+                if isinstance(data, dict) and ("Error Message" in data or "Note" in data):
+                    if "Error Message" in data:
+                        print(f"⚠️ API error: {data['Error Message']}")
+                        return None
+                    if "Note" in data:
+                        print(f"⚠️ API note: {data['Note']}")
+                        # Exponential backoff on rate limit note
+                        time.sleep(self.call_interval * (2 ** attempt))
+                        continue
+
+                return data
+
+            except requests.RequestException as exc:  # pragma: no cover - network
+                print(f"⚠️ API request error: {exc}")
+                time.sleep(self.call_interval * (2 ** attempt))
+
+        return None
+
+    def _av_request(self, function: str, **params: Any) -> Dict[str, Any] | None:
+        """Backward compatible wrapper around :meth:`_fetch_alphavantage_data`."""
+
+        return self._fetch_alphavantage_data(function, **params)
 
     # ------------------------------------------------------------------
     # ETF data
@@ -132,6 +168,182 @@ class DataFetcher:
             conn.execute(
                 "INSERT INTO update_log (run_time, ticker, table_name) VALUES (?, ?, ?)",
                 (datetime.now().isoformat(timespec="seconds"), ticker, table),
+            )
+        conn.close()
+
+    # ------------------------------------------------------------------
+    # raw Alpha Vantage data storage helpers
+    # ------------------------------------------------------------------
+    def store_fundamental_data(
+        self,
+        ticker: str,
+        function: str,
+        db_name: str | None = None,
+        **params: Any,
+    ) -> None:
+        """Fetch and store raw fundamental data."""
+
+        data = self._fetch_alphavantage_data(function, symbol=ticker, **params)
+        if data is None:
+            return
+
+        conn = self._connect(db_name)
+        table = "fundamental_data"
+        with conn:
+            conn.execute(
+                f"""CREATE TABLE IF NOT EXISTS {table} (
+                ticker TEXT,
+                function TEXT,
+                data TEXT,
+                last_updated TEXT,
+                PRIMARY KEY(ticker, function)
+            )"""
+            )
+            conn.execute(
+                f"INSERT OR REPLACE INTO {table} (ticker, function, data, last_updated) VALUES (?, ?, ?, ?)",
+                (
+                    ticker,
+                    function,
+                    json.dumps(data),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+        conn.close()
+
+    def store_technical_data(
+        self,
+        ticker: str,
+        indicator: str,
+        interval: str = "daily",
+        time_period: int | None = None,
+        series_type: str = "close",
+        db_name: str | None = None,
+        **params: Any,
+    ) -> None:
+        """Fetch and store raw technical indicator data."""
+
+        query_params = {
+            "symbol": ticker,
+            "interval": interval,
+            "series_type": series_type,
+            **params,
+        }
+        if time_period is not None:
+            query_params["time_period"] = time_period
+
+        data = self._fetch_alphavantage_data(indicator, **query_params)
+        if data is None:
+            return
+
+        conn = self._connect(db_name)
+        table = "technical_data"
+        with conn:
+            conn.execute(
+                f"""CREATE TABLE IF NOT EXISTS {table} (
+                ticker TEXT,
+                indicator TEXT,
+                interval TEXT,
+                time_period INTEGER,
+                series_type TEXT,
+                data TEXT,
+                last_updated TEXT,
+                PRIMARY KEY(ticker, indicator, interval, time_period, series_type)
+            )"""
+            )
+            conn.execute(
+                f"INSERT OR REPLACE INTO {table} (ticker, indicator, interval, time_period, series_type, data, last_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ticker,
+                    indicator,
+                    interval,
+                    time_period,
+                    series_type,
+                    json.dumps(data),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+        conn.close()
+
+    def store_economic_data(
+        self,
+        function: str,
+        db_name: str | None = None,
+        **params: Any,
+    ) -> None:
+        """Fetch and store raw economic data."""
+
+        data = self._fetch_alphavantage_data(function, **params)
+        if data is None:
+            return
+
+        conn = self._connect(db_name)
+        table = "economic_data"
+        with conn:
+            conn.execute(
+                f"""CREATE TABLE IF NOT EXISTS {table} (
+                function TEXT PRIMARY KEY,
+                data TEXT,
+                last_updated TEXT
+            )"""
+            )
+            conn.execute(
+                f"INSERT OR REPLACE INTO {table} (function, data, last_updated) VALUES (?, ?, ?)",
+                (
+                    function,
+                    json.dumps(data),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
+            )
+        conn.close()
+
+    def store_news_sentiment(
+        self,
+        tickers: List[str] | str | None = None,
+        topics: List[str] | str | None = None,
+        db_name: str | None = None,
+        **params: Any,
+    ) -> None:
+        """Fetch and store raw news sentiment data."""
+
+        def _to_param(val: List[str] | str | None) -> str | None:
+            if val is None:
+                return None
+            if isinstance(val, list):
+                return ",".join(val)
+            return val
+
+        query_params = params.copy()
+        ticker_param = _to_param(tickers)
+        topic_param = _to_param(topics)
+        if ticker_param:
+            query_params["tickers"] = ticker_param
+        if topic_param:
+            query_params["topics"] = topic_param
+
+        data = self._fetch_alphavantage_data("NEWS_SENTIMENT", **query_params)
+        if data is None:
+            return
+
+        conn = self._connect(db_name)
+        table = "news_sentiment"
+        with conn:
+            conn.execute(
+                f"""CREATE TABLE IF NOT EXISTS {table} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tickers TEXT,
+                topics TEXT,
+                data TEXT,
+                last_updated TEXT
+            )"""
+            )
+            conn.execute(
+                f"INSERT INTO {table} (tickers, topics, data, last_updated) VALUES (?, ?, ?, ?)",
+                (
+                    ticker_param,
+                    topic_param,
+                    json.dumps(data),
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
             )
         conn.close()
 
@@ -416,47 +628,6 @@ class DataFetcher:
                     )
         conn.close()
         self._log_update(indicator, table, db_name)
-
-    # ------------------------------------------------------------------
-    # news sentiment
-    # ------------------------------------------------------------------
-    def store_news_sentiment(self, tickers: List[str], db_name: str | None = None) -> None:
-        conn = self._connect(db_name)
-        table = "news_sentiment"
-        with conn:
-            conn.execute(
-                f"""CREATE TABLE IF NOT EXISTS {table} (
-                time_published TEXT,
-                ticker TEXT,
-                headline TEXT,
-                summary TEXT,
-                sentiment TEXT,
-                score REAL,
-                PRIMARY KEY (time_published, ticker)
-            )"""
-            )
-            for ticker in tickers:
-                data = self._av_request("NEWS_SENTIMENT", tickers=ticker, sort="LATEST", limit=50)
-                if not data or "feed" not in data:
-                    continue
-                for item in data["feed"]:
-                    label = item.get("ticker_sentiment", [{}])[0].get("ticker_sentiment_label")
-                    score = item.get("ticker_sentiment", [{}])[0].get("ticker_sentiment_score")
-                    conn.execute(
-                        f"INSERT OR REPLACE INTO {table} (time_published, ticker, headline, summary, sentiment, score)"
-                        " VALUES (?, ?, ?, ?, ?, ?)",
-                        (
-                            item.get("time_published"),
-                            ticker,
-                            item.get("title"),
-                            item.get("summary"),
-                            label,
-                            float(score) if score is not None else None,
-                        ),
-                    )
-        conn.close()
-        for t in tickers:
-            self._log_update(t, table, db_name)
 
     # ------------------------------------------------------------------
     # metadata helpers

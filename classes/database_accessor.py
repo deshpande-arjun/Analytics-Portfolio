@@ -172,3 +172,80 @@ class DatabaseAccessor:
             return prices
         df = prices.merge(overview, on="ticker", how="left")
         return df
+
+    # ------------------------------------------------------------------
+    # ETF holdings
+    # ------------------------------------------------------------------
+    def store_etf_holdings(self, symbol: str, data: Dict[str, Any]) -> None:
+        """Store ETF holdings data in the ``etf_holdings`` table."""
+
+        df = pd.DataFrame(data.get("holdings", []))
+        if df.empty:
+            return
+
+        df = df.rename(
+            columns={
+                "symbol": "stock_ticker",
+                "ticker": "stock_ticker",
+                "description": "name",
+                "name": "name",
+                "assetType": "asset_type",
+                "sharesHeld": "shares_held",
+                "marketValue": "market_value",
+            }
+        )
+
+        df["etf_symbol"] = symbol
+        df["date_fetched"] = pd.Timestamp("today").strftime("%Y-%m-%d")
+
+        columns = [
+            "etf_symbol",
+            "stock_ticker",
+            "name",
+            "asset_type",
+            "cusip",
+            "isin",
+            "weight",
+            "shares_held",
+            "market_value",
+            "sector",
+            "date_fetched",
+        ]
+        for col in columns:
+            if col not in df.columns:
+                df[col] = pd.NA
+        df = df[columns]
+
+        conn = self._connect()
+        with conn:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS etf_holdings (
+                    etf_symbol TEXT,
+                    stock_ticker TEXT,
+                    name TEXT,
+                    asset_type TEXT,
+                    cusip TEXT,
+                    isin TEXT,
+                    weight REAL,
+                    shares_held REAL,
+                    market_value REAL,
+                    sector TEXT,
+                    date_fetched TEXT,
+                    PRIMARY KEY (etf_symbol, stock_ticker, date_fetched)
+                )"""
+            )
+            df.to_sql("etf_holdings", conn, if_exists="append", index=False)
+        conn.close()
+
+    def get_etf_holdings(self, symbol: str) -> pd.DataFrame:
+        """Return holdings for ``symbol`` from the ``etf_holdings`` table."""
+
+        conn = self._connect()
+        df = pd.read_sql_query(
+            "SELECT * FROM etf_holdings WHERE etf_symbol = ?",
+            conn,
+            params=(symbol,),
+        )
+        conn.close()
+        df = self._to_numeric(df).fillna(pd.NA)
+        return df

@@ -41,6 +41,14 @@ class DataFetcher:
             return None
 
     # ------------------------------------------------------------------
+    # ETF data
+    # ------------------------------------------------------------------
+    def fetch_etf_profile(self, symbol: str) -> Dict[str, Any] | None:
+        """Return the ETF profile data for ``symbol``."""
+
+        return self._av_request("ETF_PROFILE", symbol=symbol)
+
+    # ------------------------------------------------------------------
     # database creation / logging
     # ------------------------------------------------------------------
     def create_database(self, db_name: str | None = None) -> None:

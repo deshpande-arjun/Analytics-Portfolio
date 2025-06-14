@@ -13,6 +13,7 @@ from .data_fetcher import DataFetcher
 from .alpha_vantage_data import AlphaVantageData  # backwards compatibility
 from .database_accessor import DatabaseAccessor
 from .feature_engineer import FeatureEngineer
+from .screener import Screener
 
 __all__ = [
     "MarketData",
@@ -22,4 +23,5 @@ __all__ = [
     "DataFetcher",
     "DatabaseAccessor",
     "FeatureEngineer",
+    "Screener",
 ]

@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Cluster stocks on fundamental ratios and track forward returns."""
+"""Run K-Means clustering on stocks and store forward returns."""
 
 from __future__ import annotations
 
 import os
-import logging
 from pathlib import Path
-from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 import pandas as pd
@@ -39,7 +37,7 @@ CONFIG = {
     "OUTPUT_TBL": "cluster_performance",
 }
 
-logger = get_logger(__name__)
+logger = get_logger(Path(__file__).stem)
 
 
 def postgres_engine():
@@ -52,34 +50,22 @@ def postgres_engine():
 
 def load_data(engine):
     """Load required tables into DataFrames."""
-    accessor = DataAccessor("")
-    accessor.engine = engine
     price = pd.read_sql_table(CONFIG["TBL_PRICE"], engine)
     overview = pd.read_sql_table(CONFIG["TBL_OVERVIEW"], engine)
     fundamentals = pd.read_sql_table(CONFIG["TBL_FUNDAMENTALS"], engine)
     return {"price": price, "overview": overview, "fundamentals": fundamentals}
 
 
-def _winsorize(df: pd.DataFrame, cols: list[str], p: float = 0.01) -> pd.DataFrame:
-    clipped = df.copy()
-    for c in cols:
-        lower = clipped[c].quantile(p)
-        upper = clipped[c].quantile(1 - p)
-        clipped[c] = clipped[c].clip(lower, upper)
-    return clipped
-
-
 def build_dataset(dfdict: dict[str, pd.DataFrame], as_of_date: pd.Timestamp) -> pd.DataFrame:
     lookback_start = as_of_date - relativedelta(months=CONFIG["LOOKBACK_MONTHS"])
     price = dfdict["price"]
-    _ = price[(price["date"] > lookback_start) & (price["date"] <= as_of_date)]  # window reserved for future use
+    _ = price[(price["date"] > lookback_start) & (price["date"] <= as_of_date)]  # reserved for future use
 
     fe = FeatureEngineer(DataAccessor(""))
     fe.accessor = None  # placeholder - FeatureEngineer may expect an accessor
     overview = dfdict["overview"]
     ratio_df = fe.add_price_based_ratios(overview, CONFIG["RATIO_KEYS"])
-
-    ratio_df = _winsorize(ratio_df.dropna(), CONFIG["RATIO_KEYS"])
+    ratio_df = FeatureEngineer.winsorize(ratio_df.dropna(), CONFIG["RATIO_KEYS"])
     return ratio_df
 
 
@@ -88,22 +74,6 @@ def run_kmeans(df_ratios: pd.DataFrame) -> pd.Series:
     model = KMeans(n_clusters=CONFIG["CLUSTERS"], random_state=42)
     labels = model.fit_predict(standardized)
     return pd.Series(labels, index=df_ratios.index)
-
-
-def compute_forward_returns(df_price: pd.DataFrame, as_of_date: pd.Timestamp) -> pd.Series:
-    start = as_of_date + relativedelta(months=CONFIG["GAP_MONTHS"])
-    end = start + relativedelta(months=CONFIG["PERF_MONTHS"])
-
-    df = df_price.set_index("date")
-    returns = {}
-    for ticker, grp in df.groupby("ticker"):
-        try:
-            start_price = grp.loc[start, "close"]
-            end_price = grp.loc[end, "close"]
-            returns[ticker] = (end_price / start_price) - 1
-        except KeyError:
-            returns[ticker] = np.nan
-    return pd.Series(returns)
 
 
 def store_snapshot(engine, snapshot_df: pd.DataFrame) -> None:
@@ -131,7 +101,7 @@ def main(start: str | None = None, end: str | None = None) -> None:
     max_date = price_dates.max() - relativedelta(months=CONFIG["PERF_MONTHS"])
 
     if start:
-        min_date = pd.to_datetime(start) + relativedelta(months=0)
+        min_date = pd.to_datetime(start)
     if end:
         max_date = pd.to_datetime(end)
 
@@ -146,7 +116,9 @@ def main(start: str | None = None, end: str | None = None) -> None:
         )
         df_screen = df_ratios.loc[df_screen.index.intersection(df_ratios.index)]
         labels = run_kmeans(df_screen)
-        fwd_ret = compute_forward_returns(data["price"], as_of)
+        fwd_ret = FeatureEngineer.forward_returns(
+            data["price"], as_of, CONFIG["GAP_MONTHS"], CONFIG["PERF_MONTHS"]
+        )
         snapshot = pd.DataFrame({
             "snapshot_date": as_of,
             "ticker": labels.index,
@@ -156,9 +128,6 @@ def main(start: str | None = None, end: str | None = None) -> None:
         })
         store_snapshot(engine, snapshot)
         logger.info(f"{as_of:%Y-%m-%d}: stored {len(snapshot)} rows")
-
-    # --- TODO: plug in alternative clustering model here ---
-    # --- TODO: add risk-adjusted return metrics ---
 
 
 if __name__ == "__main__":

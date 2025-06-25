@@ -7,6 +7,7 @@ from typing import List
 
 import pandas as pd
 import numpy as np
+from dateutil.relativedelta import relativedelta
 
 from .database_accessor import DatabaseAccessor
 
@@ -122,3 +123,38 @@ class FeatureEngineer:
         for k in keys:
             out[k] = pd.to_numeric(df.get(k), errors="coerce")
         return out
+
+    # ------------------------------------------------------------------
+    # helper utilities
+    # ------------------------------------------------------------------
+    @staticmethod
+    def winsorize(df: pd.DataFrame, cols: List[str], p: float = 0.01) -> pd.DataFrame:
+        """Winsorize ``cols`` of ``df`` at the given quantile ``p``."""
+        clipped = df.copy()
+        for c in cols:
+            lower = clipped[c].quantile(p)
+            upper = clipped[c].quantile(1 - p)
+            clipped[c] = clipped[c].clip(lower, upper)
+        return clipped
+
+    @staticmethod
+    def forward_returns(
+        df_price: pd.DataFrame,
+        as_of_date: pd.Timestamp,
+        gap_months: int = 3,
+        perf_months: int = 12,
+    ) -> pd.Series:
+        """Calculate forward returns after ``as_of_date``."""
+        start = as_of_date + relativedelta(months=gap_months)
+        end = start + relativedelta(months=perf_months)
+
+        df = df_price.set_index("date")
+        returns = {}
+        for ticker, grp in df.groupby("ticker"):
+            try:
+                start_price = grp.loc[start, "close"]
+                end_price = grp.loc[end, "close"]
+                returns[ticker] = (end_price / start_price) - 1
+            except KeyError:
+                returns[ticker] = np.nan
+        return pd.Series(returns)

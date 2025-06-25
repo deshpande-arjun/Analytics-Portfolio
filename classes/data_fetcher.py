@@ -367,7 +367,13 @@ class DataFetcher:
         for ticker in tickers:
             data = self._av_request("OVERVIEW", symbol=ticker)
             if data:
-                records.append({"ticker": ticker, "data": pd.Series(data).to_json()})
+                records.append(
+                    {
+                        "ticker": ticker,
+                        "data": pd.Series(data).to_json(),
+                        "date_fetched": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                )
 
         if not records:
             return
@@ -376,8 +382,10 @@ class DataFetcher:
         with engine.begin() as conn:
             conn.exec_driver_sql(
                 f"""CREATE TABLE IF NOT EXISTS {table} (
-                ticker TEXT PRIMARY KEY,
-                data   TEXT
+                ticker TEXT,
+                data   TEXT,
+                date_fetched TEXT,
+                PRIMARY KEY (ticker, date_fetched)
             )"""
             )
             df.to_sql(table, conn, if_exists="append", index=False, method="multi")

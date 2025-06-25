@@ -114,18 +114,16 @@ print(full_data.tail())
 
 full_data.ticker.unique_values()
 
-# =============================================================================
-# # Export data to excel spreadsheet:
-# # Create an ExcelWriter object
-# writer = pd.ExcelWriter('data_june12.xlsx', engine='xlsxwriter')
-# 
-# fundamentals['balance_sheet'].to_excel(writer, "balance_sheet.xlsx")
-# fundamentals['overview'].to_excel(writer, "overview.xlsx")
-# fundamentals['income_statement'].to_excel(writer, "income_statement.xlsx")
-# fundamentals['cash_flow'].to_excel(writer, "cash_flow.xlsx")
-# # save excel
-# writer.close()
-# =============================================================================
+# Export data to excel spreadsheet:
+# Create an ExcelWriter object
+writer = pd.ExcelWriter('data_june12.xlsx', engine='xlsxwriter')
+
+fundamentals['balance_sheet'].to_excel(writer, "balance_sheet.xlsx")
+fundamentals['overview'].to_excel(writer, "overview.xlsx")
+fundamentals['income_statement'].to_excel(writer, "income_statement.xlsx")
+fundamentals['cash_flow'].to_excel(writer, "cash_flow.xlsx")
+# save excel
+writer.close()
 
 
 print(price_overview.head())

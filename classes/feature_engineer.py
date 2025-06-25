@@ -113,3 +113,12 @@ class FeatureEngineer:
             col = scaled[c]
             scaled[c] = (col - col.min()) / (col.max() - col.min())
         return scaled
+
+    def add_price_based_ratios(self, overview: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+        """Return ``overview`` DataFrame with selected ratio columns numeric."""
+        df = overview.copy()
+        df = df.set_index("ticker") if "ticker" in df.columns else df
+        out = pd.DataFrame(index=df.index)
+        for k in keys:
+            out[k] = pd.to_numeric(df.get(k), errors="coerce")
+        return out

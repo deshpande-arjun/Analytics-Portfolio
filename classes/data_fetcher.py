@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 from sqlalchemy import text
-from ..db.core import get_engine
+from ..db.core import get_engine, ensure_tables
 import requests
+import backoff
 import time
 import json
 from datetime import datetime
@@ -23,6 +24,7 @@ class DataFetcher:
         # Alpha Vantage allows up to 75 calls per minute for most plans.
         # ``call_interval`` defines the sleep time between API requests.
         self.call_interval = 60 / 75
+        ensure_tables()
 
     # ------------------------------------------------------------------
     # connection helpers
@@ -55,11 +57,14 @@ class DataFetcher:
         payload = {"function": function, "apikey": self.api_key}
         payload.update(filtered)
 
+        @backoff.on_exception(backoff.expo, (requests.ConnectionError, requests.ReadTimeout), max_tries=5)
+        def _request() -> requests.Response:
+            return requests.get(base_url, params=payload, timeout=10)
+
         for attempt in range(3):
-            # simple rate limiting
             time.sleep(self.call_interval)
             try:
-                resp = requests.get(base_url, params=payload, timeout=10)
+                resp = _request()
                 if resp.status_code != 200:
                     print(f"⚠️ HTTP error: {resp.status_code}")
                     time.sleep(self.call_interval * (2**attempt))
@@ -82,7 +87,7 @@ class DataFetcher:
 
                 return data
 
-            except (requests.Timeout, requests.ConnectionError, requests.RequestException) as exc:  # pragma: no cover - network
+            except requests.RequestException as exc:  # pragma: no cover - network
                 print(f"⚠️ API request error: {exc}")
                 time.sleep(self.call_interval * (2**attempt))
 
@@ -182,9 +187,15 @@ class DataFetcher:
     def _log_update(self, ticker: str, table: str, db_name: str | None = None) -> None:
         engine = self._connect()
         with engine.begin() as conn:
-            conn.exec_driver_sql(
-                "INSERT INTO update_log (run_time, ticker, table_name) VALUES (?, ?, ?)",
-                (datetime.now().isoformat(timespec="seconds"), ticker, table),
+            conn.execute(
+                text(
+                    "INSERT INTO update_log (run_time, ticker, table_name) VALUES (:run_time, :ticker, :table_name)"
+                ),
+                {
+                    "run_time": datetime.now().isoformat(timespec="seconds"),
+                    "ticker": ticker,
+                    "table_name": table,
+                },
             )
 
     # ------------------------------------------------------------------
@@ -502,9 +513,11 @@ class DataFetcher:
                 PRIMARY KEY (ticker, fiscal_date_ending, period)
             )"""
             )
-            cur = conn.exec_driver_sql(
-                f"SELECT fiscal_date_ending FROM {table} WHERE ticker=? AND period=?",
-                (ticker, period),
+            cur = conn.execute(
+                text(
+                    f"SELECT fiscal_date_ending FROM {table} WHERE ticker=:ticker AND period=:period"
+                ),
+                {"ticker": ticker, "period": period},
             )
             existing = {row[0] for row in cur.fetchall()}
             data = self._av_request(function, symbol=ticker)
@@ -756,12 +769,12 @@ class DataFetcher:
     ) -> List[str]:
         engine = self._connect()
         query = "SELECT DISTINCT ticker FROM update_log"
-        params: List[Any] = []
+        params: Dict[str, Any] = {}
         if since:
-            query += " WHERE run_time >= ?"
-            params.append(since)
+            query += " WHERE run_time >= :since"
+            params["since"] = since
         with engine.connect() as conn:
-            cur = conn.exec_driver_sql(query, params)
+            cur = conn.execute(text(query), params)
             tickers = [row[0] for row in cur.fetchall()]
         return tickers
 

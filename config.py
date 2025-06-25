@@ -24,7 +24,7 @@ Class_dir = os.path.join(Base_dir, "classes")
 Portfolio_file = os.path.join(Data_dir, "CurrentPositions_dummy.csv")
 Etf_data_file = os.path.join(Data_dir, "etf_metadata.json")
 Stocksdb_file = os.path.join(Data_dir, "stocks.db")
-AV_db_file = os.path.join(Data_dir, "av_data.db")
+AV_db_file = os.path.join(Data_dir, "av_data_test1.db") #Ensure its pointed to correct database
 
 
 # API Key (if needed)

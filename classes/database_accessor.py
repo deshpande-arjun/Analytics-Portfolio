@@ -121,7 +121,7 @@ class DatabaseAccessor:
         return df
 
     def _load_overview(self, tickers: List[str] | None) -> pd.DataFrame:
-        query = "SELECT ticker, data FROM fundamental_overview"
+        query = "SELECT ticker, data, date_fetched FROM fundamental_overview"
         params: List[Any] = []
         if tickers:
             placeholders = ",".join("?" for _ in tickers)
@@ -136,9 +136,10 @@ class DatabaseAccessor:
         for _, row in raw_df.iterrows():
             data = json.loads(row["data"]) if row["data"] else {}
             data["ticker"] = row["ticker"]
+            data["date_fetched"] = row["date_fetched"]
             records.append(data)
         df = pd.DataFrame(records)
-        df = df.sort_values("ticker").reset_index(drop=True)
+        df = df.sort_values(["ticker", "date_fetched"]).reset_index(drop=True)
         df = self._to_numeric(df).fillna(pd.NA)
         return df
 
@@ -176,7 +177,11 @@ class DatabaseAccessor:
         overview = self._load_overview(tickers)
         if overview.empty or prices.empty:
             return prices
-        df = prices.merge(overview, on="ticker", how="left")
+        latest_overview = (
+            overview.sort_values("date_fetched")
+            .drop_duplicates("ticker", keep="last")
+        )
+        df = prices.merge(latest_overview, on="ticker", how="left")
         return df
 
     # ------------------------------------------------------------------

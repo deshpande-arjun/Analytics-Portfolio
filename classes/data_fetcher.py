@@ -82,7 +82,7 @@ class DataFetcher:
 
                 return data
 
-            except requests.RequestException as exc:  # pragma: no cover - network
+            except (requests.Timeout, requests.ConnectionError, requests.RequestException) as exc:  # pragma: no cover - network
                 print(f"⚠️ API request error: {exc}")
                 time.sleep(self.call_interval * (2**attempt))
 

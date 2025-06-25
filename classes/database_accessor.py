@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Utilities for reading Alpha Vantage data from SQLite."""
+"""Utilities for reading Alpha Vantage data using SQLAlchemy."""
 
 from __future__ import annotations
 
 import json
-import sqlite3
 from typing import Any, Dict, List
+
+from sqlalchemy import text
+from ..db.core import get_engine
 
 import pandas as pd
 
@@ -19,9 +21,9 @@ class DatabaseAccessor:
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
-    def _connect(self) -> sqlite3.Connection:
-        """Return a connection to :pyattr:`self.db_name`."""
-        return sqlite3.connect(self.db_name)
+    def _connect(self):
+        """Return the shared SQLAlchemy engine."""
+        return get_engine()
 
     def _to_numeric(self, df: pd.DataFrame) -> pd.DataFrame:
         """Convert non-index columns of ``df`` to numeric when possible."""
@@ -29,14 +31,18 @@ class DatabaseAccessor:
             # if col.lower() == "ticker":
             #     continue #skips ticker (string) from convert to numeric
             if pd.api.types.is_object_dtype(df[col]):
-                sample = df[col].dropna().astype(str).head(10)  # sample up to 10 non-null entries
-                
-                if sample.str.match(r'^-?\d+(\.\d+)?$').all():    
+                sample = (
+                    df[col].dropna().astype(str).head(10)
+                )  # sample up to 10 non-null entries
+
+                if sample.str.match(r"^-?\d+(\.\d+)?$").all():
                     try:
                         df[col] = pd.to_numeric(df[col])
-                    except (ValueError, TypeError) as e: 
-                        print(f" Warning: Failed to convert column '{col}' to numeric. Reason: {e}")
-                
+                    except (ValueError, TypeError) as e:
+                        print(
+                            f" Warning: Failed to convert column '{col}' to numeric. Reason: {e}"
+                        )
+
                 else:
                     continue
         return df
@@ -69,9 +75,9 @@ class DatabaseAccessor:
             params.append(end_date)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
-        conn = self._connect()
-        df = pd.read_sql_query(query, conn, params=params, parse_dates=["date"])
-        conn.close()
+        engine = self._connect()
+        with engine.connect() as conn:
+            df = pd.read_sql_query(query, conn, params=params, parse_dates=["date"])
         df = df.sort_values(["ticker", "date"]).reset_index(drop=True)
         df = self._to_numeric(df).fillna(pd.NA)
         return df
@@ -97,9 +103,9 @@ class DatabaseAccessor:
             params.append(period)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
-        conn = self._connect()
-        raw_df = pd.read_sql_query(query, conn, params=params)
-        conn.close()
+        engine = self._connect()
+        with engine.connect() as conn:
+            raw_df = pd.read_sql_query(query, conn, params=params)
         if raw_df.empty:
             return pd.DataFrame()
         records: List[Dict[str, Any]] = []
@@ -121,9 +127,9 @@ class DatabaseAccessor:
             placeholders = ",".join("?" for _ in tickers)
             query += f" WHERE ticker IN ({placeholders})"
             params.extend(tickers)
-        conn = self._connect()
-        raw_df = pd.read_sql_query(query, conn, params=params)
-        conn.close()
+        engine = self._connect()
+        with engine.connect() as conn:
+            raw_df = pd.read_sql_query(query, conn, params=params)
         if raw_df.empty:
             return pd.DataFrame()
         records: List[Dict[str, Any]] = []
@@ -216,9 +222,9 @@ class DatabaseAccessor:
                 df[col] = pd.NA
         df = df[columns]
 
-        conn = self._connect()
-        with conn:
-            conn.execute(
+        engine = self._connect()
+        with engine.begin() as conn:
+            conn.exec_driver_sql(
                 """CREATE TABLE IF NOT EXISTS etf_holdings (
                     etf_symbol TEXT,
                     stock_ticker TEXT,
@@ -234,18 +240,19 @@ class DatabaseAccessor:
                     PRIMARY KEY (etf_symbol, stock_ticker, date_fetched)
                 )"""
             )
-            df.to_sql("etf_holdings", conn, if_exists="append", index=False)
-        conn.close()
+            df.to_sql(
+                "etf_holdings", conn, if_exists="append", index=False, method="multi"
+            )
 
     def get_etf_holdings(self, symbol: str) -> pd.DataFrame:
         """Return holdings for ``symbol`` from the ``etf_holdings`` table."""
 
-        conn = self._connect()
-        df = pd.read_sql_query(
-            "SELECT * FROM etf_holdings WHERE etf_symbol = ?",
-            conn,
-            params=(symbol,),
-        )
-        conn.close()
+        engine = self._connect()
+        with engine.connect() as conn:
+            df = pd.read_sql_query(
+                "SELECT * FROM etf_holdings WHERE etf_symbol = ?",
+                conn,
+                params=(symbol,),
+            )
         df = self._to_numeric(df).fillna(pd.NA)
         return df

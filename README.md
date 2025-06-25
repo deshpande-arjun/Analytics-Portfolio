@@ -19,3 +19,10 @@ setup.py
 config.py
 logging_utils.py - helper to configure rotating loggers
 date_utils.py    - pandas-friendly date utilities
+
+## Database configuration
+
+Set the `DATABASE_URL` environment variable (see `.env.example`) to point at
+your PostgreSQL or other SQLAlchemy-supported database. The codebase no longer
+uses `sqlite3` directly and now relies on SQLAlchemy for connection pooling and
+database-agnostic queries.

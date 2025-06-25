@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from sqlalchemy import text
+from sqlalchemy import inspect
 from ..db.core import get_engine
 
 import pandas as pd
@@ -120,6 +120,34 @@ class DatabaseAccessor:
         df = self._to_numeric(df).fillna(pd.NA)
         return df
 
+    def _load_structured_table(
+        self,
+        table: str,
+        tickers: List[str] | None,
+        period: str | None,
+    ) -> pd.DataFrame:
+        cols = "*"
+        query = f"SELECT {cols} FROM {table}"
+        params: List[Any] = []
+        conditions: List[str] = []
+        if tickers:
+            placeholders = ",".join("?" for _ in tickers)
+            conditions.append(f"ticker IN ({placeholders})")
+            params.extend(tickers)
+        if period:
+            conditions.append("period = ?")
+            params.append(period)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        engine = self._connect()
+        with engine.connect() as conn:
+            df = pd.read_sql_query(query, conn, params=params)
+        if df.empty:
+            return df
+        df = df.sort_values(["ticker", "fiscal_date_ending"]).reset_index(drop=True)
+        df = self._to_numeric(df).fillna(pd.NA)
+        return df
+
     def _load_overview(self, tickers: List[str] | None) -> pd.DataFrame:
         query = "SELECT ticker, data, date_fetched FROM fundamental_overview"
         params: List[Any] = []
@@ -149,17 +177,35 @@ class DatabaseAccessor:
         period: str = "annual",
     ) -> Dict[str, pd.DataFrame]:
         """Return fundamental dataframes for ``tickers``."""
+        engine = self._connect()
+        insp = inspect(engine)
+
+        if "income_statement" in insp.get_table_names():
+            income = self._load_structured_table("income_statement", tickers, period)
+        else:
+            income = self._load_fundamental_table(
+                "fundamental_income_statement", tickers, period
+            )
+
+        if "balance_sheet" in insp.get_table_names():
+            balance = self._load_structured_table("balance_sheet", tickers, period)
+        else:
+            balance = self._load_fundamental_table(
+                "fundamental_balance_sheet", tickers, period
+            )
+
+        if "cash_flow" in insp.get_table_names():
+            cash = self._load_structured_table("cash_flow", tickers, period)
+        else:
+            cash = self._load_fundamental_table(
+                "fundamental_cash_flow", tickers, period
+            )
+
         data = {
             "overview": self._load_overview(tickers),
-            "income_statement": self._load_fundamental_table(
-                "fundamental_income_statement", tickers, period
-            ),
-            "balance_sheet": self._load_fundamental_table(
-                "fundamental_balance_sheet", tickers, period
-            ),
-            "cash_flow": self._load_fundamental_table(
-                "fundamental_cash_flow", tickers, period
-            ),
+            "income_statement": income,
+            "balance_sheet": balance,
+            "cash_flow": cash,
         }
         return data
 

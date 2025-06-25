@@ -31,6 +31,18 @@ class DataFetcher:
         """Return the shared SQLAlchemy engine."""
         return get_engine()
 
+    def _to_numeric(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Convert object columns of ``df`` to numeric when feasible."""
+        for col in df.columns:
+            if pd.api.types.is_object_dtype(df[col]):
+                sample = df[col].dropna().astype(str).head(10)
+                if sample.str.match(r"^-?\d+(\.\d+)?$").all():
+                    try:
+                        df[col] = pd.to_numeric(df[col])
+                    except (ValueError, TypeError):
+                        pass
+        return df
+
     def _fetch_alphavantage_data(
         self, function: str, **params: Any
     ) -> Dict[str, Any] | None:
@@ -426,6 +438,7 @@ class DataFetcher:
         db_name: str | None = None,
     ) -> None:
         engine = self._connect()
+        flat_table = table.replace("fundamental_", "")
         with engine.begin() as conn:
             conn.exec_driver_sql(
                 f"""CREATE TABLE IF NOT EXISTS {table} (
@@ -438,6 +451,7 @@ class DataFetcher:
             )
             key = "annualReports" if period == "annual" else "quarterlyReports"
             records = []
+            flat_records = []
             for ticker in tickers:
                 data = self._av_request(function, symbol=ticker)
                 if not data:
@@ -452,11 +466,21 @@ class DataFetcher:
                             "data": pd.Series(rep).to_json(),
                         }
                     )
+                    flat = rep.copy()
+                    flat["ticker"] = ticker
+                    flat["fiscal_date_ending"] = fdate
+                    flat["period"] = period
+                    flat_records.append(flat)
             if records:
                 df = pd.DataFrame(records)
                 df.to_sql(table, conn, if_exists="append", index=False, method="multi")
+            if flat_records:
+                df_flat = pd.DataFrame(flat_records)
+                df_flat = self._to_numeric(df_flat).fillna(pd.NA)
+                df_flat.to_sql(flat_table, conn, if_exists="append", index=False, method="multi")
         for t in tickers:
             self._log_update(t, table, db_name)
+            self._log_update(t, flat_table, db_name)
 
     def _update_fundamental_report(
         self,
@@ -467,6 +491,7 @@ class DataFetcher:
         db_name: str | None = None,
     ) -> None:
         engine = self._connect()
+        flat_table = table.replace("fundamental_", "")
         with engine.begin() as conn:
             conn.exec_driver_sql(
                 f"""CREATE TABLE IF NOT EXISTS {table} (
@@ -487,6 +512,7 @@ class DataFetcher:
                 return
             key = "annualReports" if period == "annual" else "quarterlyReports"
             records = []
+            flat_records = []
             for rep in data.get(key, []):
                 fdate = rep.get("fiscalDateEnding")
                 if fdate in existing:
@@ -499,11 +525,21 @@ class DataFetcher:
                         "data": pd.Series(rep).to_json(),
                     }
                 )
+                flat = rep.copy()
+                flat["ticker"] = ticker
+                flat["fiscal_date_ending"] = fdate
+                flat["period"] = period
+                flat_records.append(flat)
             if records:
                 pd.DataFrame(records).to_sql(
                     table, conn, if_exists="append", index=False, method="multi"
                 )
+            if flat_records:
+                df_flat = pd.DataFrame(flat_records)
+                df_flat = self._to_numeric(df_flat).fillna(pd.NA)
+                df_flat.to_sql(flat_table, conn, if_exists="append", index=False, method="multi")
         self._log_update(ticker, table, db_name)
+        self._log_update(ticker, flat_table, db_name)
 
     def store_income_statement(
         self, tickers: List[str], period: str = "annual", db_name: str | None = None

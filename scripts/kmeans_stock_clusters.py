@@ -12,7 +12,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 from sqlalchemy import create_engine
 
-from classes.data_accessor import DataAccessor
+from classes.database_accessor import DatabaseAccessor
 from classes.feature_engineer import FeatureEngineer
 from classes.screener import Screener
 from utils.logging_utils import get_logger
@@ -61,7 +61,7 @@ def build_dataset(dfdict: dict[str, pd.DataFrame], as_of_date: pd.Timestamp) -> 
     price = dfdict["price"]
     _ = price[(price["date"] > lookback_start) & (price["date"] <= as_of_date)]  # reserved for future use
 
-    fe = FeatureEngineer(DataAccessor(""))
+    fe = FeatureEngineer(DatabaseAccessor())
     fe.accessor = None  # placeholder - FeatureEngineer may expect an accessor
     overview = dfdict["overview"]
     ratio_df = fe.add_price_based_ratios(overview, CONFIG["RATIO_KEYS"])

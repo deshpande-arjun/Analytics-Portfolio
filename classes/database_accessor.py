@@ -25,6 +25,23 @@ class DatabaseAccessor:
         """Return the shared SQLAlchemy engine."""
         return get_engine()
 
+    # ------------------------------------------------------------------
+    # generic table access
+    # ------------------------------------------------------------------
+    def read_table(self, table: str) -> pd.DataFrame:
+        """Load entire ``table`` into a DataFrame."""
+        engine = self._connect()
+        return pd.read_sql_table(table, engine)
+
+    def write_frame(self, df: pd.DataFrame, table: str, if_exists: str = "append") -> None:
+        """Write ``df`` to ``table``."""
+        engine = self._connect()
+        df.to_sql(table, engine, if_exists=if_exists, index=False)
+
+    def raw_engine(self) -> Any:
+        """Return underlying SQLAlchemy engine."""
+        return self._connect()
+
     def _to_numeric(self, df: pd.DataFrame) -> pd.DataFrame:
         """Convert non-index columns of ``df`` to numeric when possible."""
         for col in df.columns:

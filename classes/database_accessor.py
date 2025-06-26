@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from ..db.core import get_engine
 
 import pandas as pd
@@ -33,7 +33,9 @@ class DatabaseAccessor:
         engine = self._connect()
         return pd.read_sql_table(table, engine)
 
-    def write_frame(self, df: pd.DataFrame, table: str, if_exists: str = "append") -> None:
+    def write_frame(
+        self, df: pd.DataFrame, table: str, if_exists: str = "append"
+    ) -> None:
         """Write ``df`` to ``table``."""
         engine = self._connect()
         df.to_sql(table, engine, if_exists=if_exists, index=False)
@@ -78,23 +80,28 @@ class DatabaseAccessor:
             "SELECT date, ticker, open, high, low, close, adjusted_close, volume "
             "FROM raw_price_data"
         )
-        params: List[Any] = []
+        params: Dict[str, Any] = {}
         conditions: List[str] = []
         if tickers:
-            placeholders = ",".join("?" for _ in tickers)
-            conditions.append(f"ticker IN ({placeholders})")
-            params.extend(tickers)
+            placeholders = []
+            for i, t in enumerate(tickers):
+                key = f"tick{i}"
+                placeholders.append(f":{key}")
+                params[key] = t
+            conditions.append(f"ticker IN ({','.join(placeholders)})")
         if start_date:
-            conditions.append("date >= ?")
-            params.append(start_date)
+            conditions.append("date >= :start_date")
+            params["start_date"] = start_date
         if end_date:
-            conditions.append("date <= ?")
-            params.append(end_date)
+            conditions.append("date <= :end_date")
+            params["end_date"] = end_date
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         engine = self._connect()
         with engine.connect() as conn:
-            df = pd.read_sql_query(query, conn, params=params, parse_dates=["date"])
+            df = pd.read_sql_query(
+                text(query), conn, params=params, parse_dates=["date"]
+            )
         df = df.sort_values(["ticker", "date"]).reset_index(drop=True)
         df = self._to_numeric(df).fillna(pd.NA)
         return df
@@ -109,20 +116,23 @@ class DatabaseAccessor:
         period: str | None,
     ) -> pd.DataFrame:
         query = f"SELECT ticker, fiscal_date_ending, period, data FROM {table}"
-        params: List[Any] = []
+        params: Dict[str, Any] = {}
         conditions: List[str] = []
         if tickers:
-            placeholders = ",".join("?" for _ in tickers)
-            conditions.append(f"ticker IN ({placeholders})")
-            params.extend(tickers)
+            placeholders = []
+            for i, t in enumerate(tickers):
+                key = f"tick{i}"
+                placeholders.append(f":{key}")
+                params[key] = t
+            conditions.append(f"ticker IN ({','.join(placeholders)})")
         if period:
-            conditions.append("period = ?")
-            params.append(period)
+            conditions.append("period = :period")
+            params["period"] = period
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         engine = self._connect()
         with engine.connect() as conn:
-            raw_df = pd.read_sql_query(query, conn, params=params)
+            raw_df = pd.read_sql_query(text(query), conn, params=params)
         if raw_df.empty:
             return pd.DataFrame()
         records: List[Dict[str, Any]] = []
@@ -145,20 +155,23 @@ class DatabaseAccessor:
     ) -> pd.DataFrame:
         cols = "*"
         query = f"SELECT {cols} FROM {table}"
-        params: List[Any] = []
+        params: Dict[str, Any] = {}
         conditions: List[str] = []
         if tickers:
-            placeholders = ",".join("?" for _ in tickers)
-            conditions.append(f"ticker IN ({placeholders})")
-            params.extend(tickers)
+            placeholders = []
+            for i, t in enumerate(tickers):
+                key = f"tick{i}"
+                placeholders.append(f":{key}")
+                params[key] = t
+            conditions.append(f"ticker IN ({','.join(placeholders)})")
         if period:
-            conditions.append("period = ?")
-            params.append(period)
+            conditions.append("period = :period")
+            params["period"] = period
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         engine = self._connect()
         with engine.connect() as conn:
-            df = pd.read_sql_query(query, conn, params=params)
+            df = pd.read_sql_query(text(query), conn, params=params)
         if df.empty:
             return df
         df = df.sort_values(["ticker", "fiscal_date_ending"]).reset_index(drop=True)
@@ -166,25 +179,28 @@ class DatabaseAccessor:
         return df
 
     def _load_overview(self, tickers: List[str] | None) -> pd.DataFrame:
-        query = "SELECT ticker, data, date_fetched FROM fundamental_overview"
-        params: List[Any] = []
+        query = "SELECT ticker, data, pulled_at FROM fundamental_overview"
+        params: Dict[str, Any] = {}
         if tickers:
-            placeholders = ",".join("?" for _ in tickers)
-            query += f" WHERE ticker IN ({placeholders})"
-            params.extend(tickers)
+            placeholders = []
+            for i, t in enumerate(tickers):
+                key = f"tick{i}"
+                placeholders.append(f":{key}")
+                params[key] = t
+            query += f" WHERE ticker IN ({','.join(placeholders)})"
         engine = self._connect()
         with engine.connect() as conn:
-            raw_df = pd.read_sql_query(query, conn, params=params)
+            raw_df = pd.read_sql_query(text(query), conn, params=params)
         if raw_df.empty:
             return pd.DataFrame()
         records: List[Dict[str, Any]] = []
         for _, row in raw_df.iterrows():
             data = json.loads(row["data"]) if row["data"] else {}
             data["ticker"] = row["ticker"]
-            data["date_fetched"] = row["date_fetched"]
+            data["pulled_at"] = row["pulled_at"]
             records.append(data)
         df = pd.DataFrame(records)
-        df = df.sort_values(["ticker", "date_fetched"]).reset_index(drop=True)
+        df = df.sort_values(["ticker", "pulled_at"]).reset_index(drop=True)
         df = self._to_numeric(df).fillna(pd.NA)
         return df
 
@@ -240,9 +256,8 @@ class DatabaseAccessor:
         overview = self._load_overview(tickers)
         if overview.empty or prices.empty:
             return prices
-        latest_overview = (
-            overview.sort_values("date_fetched")
-            .drop_duplicates("ticker", keep="last")
+        latest_overview = overview.sort_values("pulled_at").drop_duplicates(
+            "ticker", keep="last"
         )
         df = prices.merge(latest_overview, on="ticker", how="left")
         return df
@@ -318,9 +333,9 @@ class DatabaseAccessor:
         engine = self._connect()
         with engine.connect() as conn:
             df = pd.read_sql_query(
-                "SELECT * FROM etf_holdings WHERE etf_symbol = ?",
+                text("SELECT * FROM etf_holdings WHERE etf_symbol = :sym"),
                 conn,
-                params=(symbol,),
+                params={"sym": symbol},
             )
         df = self._to_numeric(df).fillna(pd.NA)
         return df

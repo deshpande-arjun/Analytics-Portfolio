@@ -2,8 +2,11 @@ import importlib.util
 import types
 from pathlib import Path
 from sqlalchemy import text
+import sys
 
 root = Path(__file__).resolve().parents[1]
+
+sys.path.insert(0, str(root))
 
 pkg = types.ModuleType("portfolio_analytics")
 pkg.__path__ = [str(root)]
@@ -20,8 +23,6 @@ spec_df = importlib.util.spec_from_file_location(
 classes_pkg = types.ModuleType("portfolio_analytics.classes")
 classes_pkg.__path__ = [str(root / "classes")]
 DataFetcher_mod = importlib.util.module_from_spec(spec_df)
-
-import sys
 
 sys.modules["portfolio_analytics"] = pkg
 sys.modules["portfolio_analytics.db.core"] = core

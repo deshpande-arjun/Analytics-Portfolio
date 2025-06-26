@@ -30,6 +30,13 @@ class DataFetcher:
         """Return a connection to the configured database."""
         return sqlite3.connect(db_name or self.db_name)
 
+    def _ensure_date_fetched_column(self, conn: sqlite3.Connection, table: str) -> None:
+        """Add a ``date_fetched`` column to ``table`` if it doesn't exist."""
+        cur = conn.execute(f"PRAGMA table_info({table})")
+        cols = {row[1] for row in cur.fetchall()}
+        if "date_fetched" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN date_fetched TEXT")
+
     def _fetch_alphavantage_data(self, function: str, **params: Any) -> Dict[str, Any] | None:
         """Call the Alpha Vantage API respecting rate limits and retries."""
 
@@ -196,16 +203,19 @@ class DataFetcher:
                 function TEXT,
                 data TEXT,
                 last_updated TEXT,
+                date_fetched TEXT,
                 PRIMARY KEY(ticker, function)
             )"""
             )
+            self._ensure_date_fetched_column(conn, table)
             conn.execute(
-                f"INSERT OR REPLACE INTO {table} (ticker, function, data, last_updated) VALUES (?, ?, ?, ?)",
+                f"INSERT OR REPLACE INTO {table} (ticker, function, data, last_updated, date_fetched) VALUES (?, ?, ?, ?, ?)",
                 (
                     ticker,
                     function,
                     json.dumps(data),
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    datetime.now().isoformat(timespec="seconds"),
                 ),
             )
         conn.close()
@@ -247,11 +257,13 @@ class DataFetcher:
                 series_type TEXT,
                 data TEXT,
                 last_updated TEXT,
+                date_fetched TEXT,
                 PRIMARY KEY(ticker, indicator, interval, time_period, series_type)
             )"""
             )
+            self._ensure_date_fetched_column(conn, table)
             conn.execute(
-                f"INSERT OR REPLACE INTO {table} (ticker, indicator, interval, time_period, series_type, data, last_updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                f"INSERT OR REPLACE INTO {table} (ticker, indicator, interval, time_period, series_type, data, last_updated, date_fetched) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     ticker,
                     indicator,
@@ -260,6 +272,7 @@ class DataFetcher:
                     series_type,
                     json.dumps(data),
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    datetime.now().isoformat(timespec="seconds"),
                 ),
             )
         conn.close()
@@ -283,15 +296,18 @@ class DataFetcher:
                 f"""CREATE TABLE IF NOT EXISTS {table} (
                 function TEXT PRIMARY KEY,
                 data TEXT,
-                last_updated TEXT
+                last_updated TEXT,
+                date_fetched TEXT
             )"""
             )
+            self._ensure_date_fetched_column(conn, table)
             conn.execute(
-                f"INSERT OR REPLACE INTO {table} (function, data, last_updated) VALUES (?, ?, ?)",
+                f"INSERT OR REPLACE INTO {table} (function, data, last_updated, date_fetched) VALUES (?, ?, ?, ?)",
                 (
                     function,
                     json.dumps(data),
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    datetime.now().isoformat(timespec="seconds"),
                 ),
             )
         conn.close()
@@ -333,16 +349,19 @@ class DataFetcher:
                 tickers TEXT,
                 topics TEXT,
                 data TEXT,
-                last_updated TEXT
+                last_updated TEXT,
+                date_fetched TEXT
             )"""
             )
+            self._ensure_date_fetched_column(conn, table)
             conn.execute(
-                f"INSERT INTO {table} (tickers, topics, data, last_updated) VALUES (?, ?, ?, ?)",
+                f"INSERT INTO {table} (tickers, topics, data, last_updated, date_fetched) VALUES (?, ?, ?, ?, ?)",
                 (
                     ticker_param,
                     topic_param,
                     json.dumps(data),
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    datetime.now().isoformat(timespec="seconds"),
                 ),
             )
         conn.close()
@@ -357,15 +376,17 @@ class DataFetcher:
             conn.execute(
                 f"""CREATE TABLE IF NOT EXISTS {table} (
                 ticker TEXT PRIMARY KEY,
-                data   TEXT
+                data   TEXT,
+                date_fetched TEXT
             )"""
             )
+            self._ensure_date_fetched_column(conn, table)
             for ticker in tickers:
                 data = self._av_request("OVERVIEW", symbol=ticker)
                 if data:
                     conn.execute(
-                        f"INSERT OR REPLACE INTO {table} (ticker, data) VALUES (?, ?)",
-                        (ticker, pd.Series(data).to_json()),
+                        f"INSERT OR REPLACE INTO {table} (ticker, data, date_fetched) VALUES (?, ?, ?)",
+                        (ticker, pd.Series(data).to_json(), datetime.now().isoformat(timespec="seconds")),
                     )
         conn.close()
         for t in tickers:
@@ -408,9 +429,11 @@ class DataFetcher:
                 fiscal_date_ending TEXT,
                 period TEXT,
                 data TEXT,
+                date_fetched TEXT,
                 PRIMARY KEY (ticker, fiscal_date_ending, period)
             )"""
             )
+            self._ensure_date_fetched_column(conn, table)
             key = "annualReports" if period == "annual" else "quarterlyReports"
             for ticker in tickers:
                 data = self._av_request(function, symbol=ticker)
@@ -419,9 +442,15 @@ class DataFetcher:
                 for rep in data.get(key, []):
                     fdate = rep.get("fiscalDateEnding")
                     conn.execute(
-                        f"INSERT OR REPLACE INTO {table} (ticker, fiscal_date_ending, period, data)"
-                        " VALUES (?, ?, ?, ?)",
-                        (ticker, fdate, period, pd.Series(rep).to_json()),
+                        f"INSERT OR REPLACE INTO {table} (ticker, fiscal_date_ending, period, data, date_fetched)"
+                        " VALUES (?, ?, ?, ?, ?)",
+                        (
+                            ticker,
+                            fdate,
+                            period,
+                            pd.Series(rep).to_json(),
+                            datetime.now().isoformat(timespec="seconds"),
+                        ),
                     )
         conn.close()
         for t in tickers:
@@ -443,9 +472,11 @@ class DataFetcher:
                 fiscal_date_ending TEXT,
                 period TEXT,
                 data TEXT,
+                date_fetched TEXT,
                 PRIMARY KEY (ticker, fiscal_date_ending, period)
             )"""
             )
+            self._ensure_date_fetched_column(conn, table)
             cur = conn.execute(
                 f"SELECT fiscal_date_ending FROM {table} WHERE ticker=? AND period=?",
                 (ticker, period),
@@ -460,9 +491,15 @@ class DataFetcher:
                 if fdate in existing:
                     continue
                 conn.execute(
-                    f"INSERT OR REPLACE INTO {table} (ticker, fiscal_date_ending, period, data)"
-                    " VALUES (?, ?, ?, ?)",
-                    (ticker, fdate, period, pd.Series(rep).to_json()),
+                    f"INSERT OR REPLACE INTO {table} (ticker, fiscal_date_ending, period, data, date_fetched)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (
+                        ticker,
+                        fdate,
+                        period,
+                        pd.Series(rep).to_json(),
+                        datetime.now().isoformat(timespec="seconds"),
+                    ),
                 )
         conn.close()
         self._log_update(ticker, table, db_name)
@@ -515,9 +552,11 @@ class DataFetcher:
                 close REAL,
                 adjusted_close REAL,
                 volume REAL,
+                date_fetched TEXT,
                 PRIMARY KEY (date, ticker)
             )"""
             )
+            self._ensure_date_fetched_column(conn, table)
             cur = conn.execute(f"SELECT date FROM {table} WHERE ticker=?", (ticker,))
             existing = {row[0] for row in cur.fetchall()}
             for dt, row in data["Time Series (Daily)"].items():
@@ -537,9 +576,9 @@ class DataFetcher:
                 except (KeyError, ValueError):
                     continue
                 conn.execute(
-                    f"INSERT OR REPLACE INTO {table} (date, ticker, open, high, low, close, adjusted_close, volume)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    record,
+                    f"INSERT OR REPLACE INTO {table} (date, ticker, open, high, low, close, adjusted_close, volume, date_fetched)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    record + (datetime.now().isoformat(timespec="seconds"),),
                 )
         conn.close()
         self._log_update(ticker, table, db_name)
@@ -571,9 +610,11 @@ class DataFetcher:
                 ticker TEXT,
                 indicator TEXT,
                 value REAL,
+                date_fetched TEXT,
                 PRIMARY KEY (date, ticker, indicator)
             )"""
             )
+            self._ensure_date_fetched_column(conn, table)
             key = next((k for k in data.keys() if k.startswith("Technical")), None)
             if key and data.get(key):
                 for dt, val in data[key].items():
@@ -585,9 +626,9 @@ class DataFetcher:
                     except (ValueError, StopIteration):
                         continue
                     conn.execute(
-                        f"INSERT OR REPLACE INTO {table} (date, ticker, indicator, value)"
-                        " VALUES (?, ?, ?, ?)",
-                        (dt, ticker, indicator, val),
+                        f"INSERT OR REPLACE INTO {table} (date, ticker, indicator, value, date_fetched)"
+                        " VALUES (?, ?, ?, ?, ?)",
+                        (dt, ticker, indicator, val, datetime.now().isoformat(timespec="seconds")),
                     )
         conn.close()
         self._log_update(ticker, table, db_name)
@@ -607,9 +648,11 @@ class DataFetcher:
                 date TEXT,
                 indicator TEXT,
                 value REAL,
+                date_fetched TEXT,
                 PRIMARY KEY (date, indicator)
             )"""
             )
+            self._ensure_date_fetched_column(conn, table)
             series = next((v for k, v in data.items() if isinstance(v, list)), None)
             if series:
                 for row in series:
@@ -622,9 +665,9 @@ class DataFetcher:
                     except ValueError:
                         continue
                     conn.execute(
-                        f"INSERT OR REPLACE INTO {table} (date, indicator, value)"
-                        " VALUES (?, ?, ?)",
-                        (dt, indicator, val),
+                        f"INSERT OR REPLACE INTO {table} (date, indicator, value, date_fetched)"
+                        " VALUES (?, ?, ?, ?)",
+                        (dt, indicator, val, datetime.now().isoformat(timespec="seconds")),
                     )
         conn.close()
         self._log_update(indicator, table, db_name)

@@ -176,14 +176,6 @@ class DataFetcher:
                 PRIMARY KEY (time_published, ticker)
             )"""
             )
-            conn.exec_driver_sql(
-                """CREATE TABLE IF NOT EXISTS update_log (
-                run_time TEXT,
-                ticker TEXT,
-                table_name TEXT,
-                PRIMARY KEY (run_time, ticker, table_name)
-            )"""
-            )
         # Engine connections are automatically closed
 
     def _log_update(self, ticker: str, table: str, db_name: str | None = None) -> None:
@@ -191,9 +183,9 @@ class DataFetcher:
         with engine.begin() as conn:
             conn.execute(
                 text(
-                    "INSERT INTO update_log (run_time, ticker, table_name) VALUES (NOW(), :ticker, :tbl)"
+                    "INSERT INTO update_log (run_time, ticker, table_name) VALUES (:run_time, :ticker, :tbl)"
                 ),
-                {"ticker": ticker, "tbl": table},
+                {"run_time": datetime.utcnow(), "ticker": ticker, "tbl": table},
             )
 
     # ------------------------------------------------------------------

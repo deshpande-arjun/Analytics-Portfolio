@@ -23,6 +23,13 @@ class DatabaseAccessor:
         """Return a connection to :pyattr:`self.db_name`."""
         return sqlite3.connect(self.db_name)
 
+    def _ensure_date_fetched_column(self, conn: sqlite3.Connection, table: str) -> None:
+        """Add ``date_fetched`` column to ``table`` if missing."""
+        cur = conn.execute(f"PRAGMA table_info({table})")
+        cols = {row[1] for row in cur.fetchall()}
+        if "date_fetched" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN date_fetched TEXT")
+
     def _to_numeric(self, df: pd.DataFrame) -> pd.DataFrame:
         """Convert non-index columns of ``df`` to numeric when possible."""
         for col in df.columns:
@@ -234,6 +241,7 @@ class DatabaseAccessor:
                     PRIMARY KEY (etf_symbol, stock_ticker, date_fetched)
                 )"""
             )
+            self._ensure_date_fetched_column(conn, "etf_holdings")
             df.to_sql("etf_holdings", conn, if_exists="append", index=False)
         conn.close()
 

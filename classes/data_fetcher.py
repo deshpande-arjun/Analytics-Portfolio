@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from sqlalchemy import text
-from ..db.core import get_engine, ensure_tables
+from db.core import get_engine, ensure_tables
 import requests
 import backoff
 import time

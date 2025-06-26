@@ -7,7 +7,7 @@ import json
 from typing import Any, Dict, List
 
 from sqlalchemy import inspect, text
-from ..db.core import get_engine
+from db.core import get_engine
 
 import pandas as pd
 

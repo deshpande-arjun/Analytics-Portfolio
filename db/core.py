@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import os
-from contextlib import contextmanager
 from functools import lru_cache
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
 from dotenv import load_dotenv
 
 load_dotenv()
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "sqlite:///av_data.db",
+    "postgresql+psycopg://postgres:Secret@localhost:5432/trading_data",
 )
 
 
@@ -31,7 +29,7 @@ def ensure_tables() -> None:
             text(
                 """
                 CREATE TABLE IF NOT EXISTS update_log (
-                    run_time TEXT,
+                    run_time TIMESTAMPTZ,
                     ticker TEXT,
                     table_name TEXT,
                     PRIMARY KEY (run_time, ticker, table_name)
@@ -39,16 +37,3 @@ def ensure_tables() -> None:
                 """
             )
         )
-
-
-@contextmanager
-def get_session() -> Session:
-    """Provide a transactional SQLAlchemy session."""
-    engine = get_engine()
-    SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
-    session = SessionLocal()
-    try:
-        yield session
-        session.commit()
-    finally:
-        session.close()

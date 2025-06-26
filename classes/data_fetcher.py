@@ -57,7 +57,9 @@ class DataFetcher:
         payload = {"function": function, "apikey": self.api_key}
         payload.update(filtered)
 
-        @backoff.on_exception(backoff.expo, (requests.ConnectionError, requests.ReadTimeout), max_tries=5)
+        @backoff.on_exception(
+            backoff.expo, (requests.ConnectionError, requests.ReadTimeout), max_tries=5
+        )
         def _request() -> requests.Response:
             return requests.get(base_url, params=payload, timeout=10)
 
@@ -189,13 +191,9 @@ class DataFetcher:
         with engine.begin() as conn:
             conn.execute(
                 text(
-                    "INSERT INTO update_log (run_time, ticker, table_name) VALUES (:run_time, :ticker, :table_name)"
+                    "INSERT INTO update_log (run_time, ticker, table_name) VALUES (NOW(), :ticker, :tbl)"
                 ),
-                {
-                    "run_time": datetime.now().isoformat(timespec="seconds"),
-                    "ticker": ticker,
-                    "table_name": table,
-                },
+                {"ticker": ticker, "tbl": table},
             )
 
     # ------------------------------------------------------------------
@@ -386,32 +384,26 @@ class DataFetcher:
     ) -> None:
         engine = self._connect()
         table = "fundamental_overview"
-        records = []
-        for ticker in tickers:
-            data = self._av_request("OVERVIEW", symbol=ticker)
-            if data:
-                records.append(
-                    {
-                        "ticker": ticker,
-                        "data": pd.Series(data).to_json(),
-                        "date_fetched": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    }
-                )
-
-        if not records:
-            return
-
-        df = pd.DataFrame(records)
         with engine.begin() as conn:
             conn.exec_driver_sql(
                 f"""CREATE TABLE IF NOT EXISTS {table} (
                 ticker TEXT,
                 data   TEXT,
-                date_fetched TEXT,
-                PRIMARY KEY (ticker, date_fetched)
+                pulled_at TIMESTAMPTZ NOT NULL,
+                PRIMARY KEY (ticker, pulled_at)
             )"""
             )
-            df.to_sql(table, conn, if_exists="append", index=False, method="multi")
+            for ticker in tickers:
+                data = self._av_request("OVERVIEW", symbol=ticker)
+                if not data:
+                    continue
+                conn.execute(
+                    text(
+                        "INSERT INTO fundamental_overview (ticker, data, pulled_at)"
+                        " VALUES (:ticker, :data, NOW()) ON CONFLICT DO NOTHING"
+                    ),
+                    {"ticker": ticker, "data": pd.Series(data).to_json()},
+                )
         for t in tickers:
             self._log_update(t, table, db_name)
 
@@ -457,11 +449,11 @@ class DataFetcher:
                 fiscal_date_ending TEXT,
                 period TEXT,
                 data TEXT,
+                pulled_at TIMESTAMPTZ NOT NULL,
                 PRIMARY KEY (ticker, fiscal_date_ending, period)
             )"""
             )
             key = "annualReports" if period == "annual" else "quarterlyReports"
-            records = []
             flat_records = []
             for ticker in tickers:
                 data = self._av_request(function, symbol=ticker)
@@ -469,26 +461,29 @@ class DataFetcher:
                     continue
                 for rep in data.get(key, []):
                     fdate = rep.get("fiscalDateEnding")
-                    records.append(
+                    conn.execute(
+                        text(
+                            f"INSERT INTO {table} (ticker, fiscal_date_ending, period, data, pulled_at) "
+                            "VALUES (:ticker, :fdate, :period, :data, NOW()) ON CONFLICT DO NOTHING"
+                        ),
                         {
                             "ticker": ticker,
-                            "fiscal_date_ending": fdate,
+                            "fdate": fdate,
                             "period": period,
                             "data": pd.Series(rep).to_json(),
-                        }
+                        },
                     )
                     flat = rep.copy()
                     flat["ticker"] = ticker
                     flat["fiscal_date_ending"] = fdate
                     flat["period"] = period
                     flat_records.append(flat)
-            if records:
-                df = pd.DataFrame(records)
-                df.to_sql(table, conn, if_exists="append", index=False, method="multi")
             if flat_records:
                 df_flat = pd.DataFrame(flat_records)
                 df_flat = self._to_numeric(df_flat).fillna(pd.NA)
-                df_flat.to_sql(flat_table, conn, if_exists="append", index=False, method="multi")
+                df_flat.to_sql(
+                    flat_table, conn, if_exists="append", index=False, method="multi"
+                )
         for t in tickers:
             self._log_update(t, table, db_name)
             self._log_update(t, flat_table, db_name)
@@ -510,6 +505,7 @@ class DataFetcher:
                 fiscal_date_ending TEXT,
                 period TEXT,
                 data TEXT,
+                pulled_at TIMESTAMPTZ NOT NULL,
                 PRIMARY KEY (ticker, fiscal_date_ending, period)
             )"""
             )
@@ -524,33 +520,34 @@ class DataFetcher:
             if not data:
                 return
             key = "annualReports" if period == "annual" else "quarterlyReports"
-            records = []
             flat_records = []
             for rep in data.get(key, []):
                 fdate = rep.get("fiscalDateEnding")
                 if fdate in existing:
                     continue
-                records.append(
+                conn.execute(
+                    text(
+                        f"INSERT INTO {table} (ticker, fiscal_date_ending, period, data, pulled_at) "
+                        "VALUES (:ticker, :fdate, :period, :data, NOW()) ON CONFLICT DO NOTHING"
+                    ),
                     {
                         "ticker": ticker,
-                        "fiscal_date_ending": fdate,
+                        "fdate": fdate,
                         "period": period,
                         "data": pd.Series(rep).to_json(),
-                    }
+                    },
                 )
                 flat = rep.copy()
                 flat["ticker"] = ticker
                 flat["fiscal_date_ending"] = fdate
                 flat["period"] = period
                 flat_records.append(flat)
-            if records:
-                pd.DataFrame(records).to_sql(
-                    table, conn, if_exists="append", index=False, method="multi"
-                )
             if flat_records:
                 df_flat = pd.DataFrame(flat_records)
                 df_flat = self._to_numeric(df_flat).fillna(pd.NA)
-                df_flat.to_sql(flat_table, conn, if_exists="append", index=False, method="multi")
+                df_flat.to_sql(
+                    flat_table, conn, if_exists="append", index=False, method="multi"
+                )
         self._log_update(ticker, table, db_name)
         self._log_update(ticker, flat_table, db_name)
 

@@ -3,3 +3,5 @@ requests
 pandas
 numpy
 sqlite3
+sqlalchemy
+scikit-learn

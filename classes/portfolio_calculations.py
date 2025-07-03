@@ -245,6 +245,28 @@ class PortfolioCalculations:
         attribution_df = merged_df.groupby("date")[["allocation_effect", "selection_effect", "total_active_return"]].sum().reset_index()
     
         return attribution_df
+
+    def compute_forward_returns(
+        self,
+        price_df: pd.DataFrame,
+        as_of_date: pd.Timestamp,
+        gap_months: int = 3,
+        perf_months: int = 12,
+    ) -> pd.Series:
+        """Return forward returns starting ``gap_months`` after ``as_of_date``."""
+        start = as_of_date + pd.DateOffset(months=gap_months)
+        end = start + pd.DateOffset(months=perf_months)
+
+        df = price_df.set_index("date")
+        returns: dict[str, float] = {}
+        for ticker, grp in df.groupby("ticker"):
+            try:
+                start_price = grp.loc[start, "close"]
+                end_price = grp.loc[end, "close"]
+                returns[ticker] = (end_price / start_price) - 1
+            except KeyError:
+                returns[ticker] = np.nan
+        return pd.Series(returns)
     
     
         # mapping = {

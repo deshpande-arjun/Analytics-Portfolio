@@ -113,3 +113,21 @@ class FeatureEngineer:
             col = scaled[c]
             scaled[c] = (col - col.min()) / (col.max() - col.min())
         return scaled
+
+    def winsorize(self, df: pd.DataFrame, cols: List[str], p: float = 0.01) -> pd.DataFrame:
+        """Clip ``cols`` in ``df`` to the ``p`` and ``1-p`` quantiles."""
+        clipped = df.copy()
+        for c in cols:
+            lower = clipped[c].quantile(p)
+            upper = clipped[c].quantile(1 - p)
+            clipped[c] = clipped[c].clip(lower, upper)
+        return clipped
+
+    def add_price_based_ratios(self, overview: pd.DataFrame, keys: List[str]) -> pd.DataFrame:
+        """Return ``overview`` DataFrame with numeric ratio columns for ``keys``."""
+        df = overview.copy()
+        df = df.set_index("ticker") if "ticker" in df.columns else df
+        out = pd.DataFrame(index=df.index)
+        for k in keys:
+            out[k] = pd.to_numeric(df.get(k), errors="coerce")
+        return out

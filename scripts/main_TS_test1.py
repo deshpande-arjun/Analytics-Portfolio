@@ -205,6 +205,7 @@ import pandas as pd
 from config import AV_api_key, AV_db_file
 from classes import DataFetcher, DatabaseAccessor, FeatureEngineer
 
+AV_db_file = "D:\\Trading_Strategy\\codebase\\TS_code\\Analytics-Portfolio\\data\\av_data_test1.db"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -242,21 +243,23 @@ for ticker in TICKERS:
 print("Raw data downloaded and stored.")
 
 
+TICKERS = tickers_R3000.copy()
+
 # ---------------------------------------------------------------------------
 # Access stored data
 # ---------------------------------------------------------------------------
 accessor = DatabaseAccessor(db_name=AV_db_file)
 prices = accessor.get_prices(TICKERS)
-fundamentals = accessor.get_fundamentals(TICKERS)
+fundamentals = accessor.get_fundamentals(TICKERS, period = "quarterlyReports")
 
 # Example join of prices with company overview
-price_overview = accessor.get_prices_with_overview(TICKERS)
+#price_overview = accessor.get_prices_with_overview(TICKERS) ##WHY IS THIS needed?
 
 # ---------------------------------------------------------------------------
 # Feature engineering
 # ---------------------------------------------------------------------------
 engineer = FeatureEngineer(accessor)
-ratios = engineer.compute_financial_ratios(TICKERS)
+ratios = engineer.compute_financial_ratios(TICKERS,period = "quarterlyReports" )
 volatility = engineer.rolling_volatility(prices, window=20)
 
 # Merge engineered features with daily prices
@@ -268,3 +271,32 @@ full_data = full_data.merge(volatility[["ticker", "date", "volatility"]],
 # volatility estimates. This DataFrame can be used for modeling or
 # regression analysis.
 print(full_data.head())
+
+
+#%%
+
+import pandas as pd
+
+def get_russell_3000_tickers():
+    """
+    Downloads the Russell 3000 ETF (IWV) holdings CSV from iShares
+    and returns the full list of tickers (~3,000).
+    """
+    # iShares Russell 3000 ETF (IWV) holdings CSV endpoint
+    url = (
+        "https://www.ishares.com/us/products/239714/ishares-russell-3000"
+        "/1467271812596.ajax?fileType=csv&fileName=IWV_holdings&dataType=fund"
+    )
+    try:
+        # Read CSV directly
+        df = pd.read_csv(url, skiprows=9)
+        tickers = df["Ticker"].dropna().unique().tolist()
+        print(f"✅ Retrieved {len(tickers)} tickers (expected ~3000).")
+        return tickers
+    except Exception as e:
+        print("⚠️ Error fetching tickers:", e)
+        return []
+
+if __name__ == "__main__":
+    tickers_R3000 = get_russell_3000_tickers()
+    print(tickers_R3000[:10])
